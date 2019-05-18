@@ -56,17 +56,18 @@ def p(X, mu, M):
 Defining filters.
 """
 
-def filter_m_sp(S, indicator, v, u, eps, k, m, d, tau, fdr = 0.1, plot=0, f=0):
+def filter_m_sp(S, indicator, v, ev, u, eps, k, tau, fdr = 0.1, plot=0, f=0):
     
     """This filters elements of S whenever the 
     deviation of <x, v> from the median 
     is more than reasonable. 
     """
-    
+    m, d = S.shape
     l = len(S)
     dots = S.dot(v)
-    
     m2 = np.median(dots)
+
+    x = np.abs(dots - m2) - 3 np.sqrt(eps*ev)
     p_x = tail_m(np.abs(dots - m2), eps, k, m, d, tau)
     p_x[p_x > 1] = 1
     
@@ -75,18 +76,14 @@ def filter_m_sp(S, indicator, v, u, eps, k, m, d, tau, fdr = 0.1, plot=0, f=0):
 
         
     T = l - np.argmin((sorted_p - (fdr/l)*np.arange(l) > 0)[::-1])
-    if T>5*eps*m: T = 0
-    
-#    print(p_x.shape)
-#    print(sorted_p.shape)
+    if T>0.5*m: T = 0
     idx = np.nonzero((p_x >= sorted_p[T]))
     
     if len(S)==len(idx[0]):
         tfdr = 0
     else:
         tfdr = (sum(indicator) - sum(indicator[idx]))/(len(S)-len(idx[0]))
-
-    
+        
     if plot==1:
         plt.plot(np.arange(l), sorted_p)
         plt.plot(T*np.ones(100), 0.01*np.arange(100), linewidth=3)
@@ -96,13 +93,11 @@ def filter_m_sp(S, indicator, v, u, eps, k, m, d, tau, fdr = 0.1, plot=0, f=0):
         plt.xlabel("Experiments")
         plt.ylabel("p-values")
         plt.figure(f)
-
-
-
+        
     return idx
 
 
-def filter_c_sp(S, indicator, M_u, mu, eps, k, m, d, tau, u, fdr=0.1, plot =0, f=0):
+def filter_c_sp(S, indicator, M_u, mu, eps, k, tau, u, fdr=0.1, plot =0, f=0):
     
     """
     This filters elements of S whenever the 
@@ -111,12 +106,10 @@ def filter_c_sp(S, indicator, M_u, mu, eps, k, m, d, tau, u, fdr=0.1, plot =0, f
     """
     
     l = len(S)
+    m, d = S.shape
     p_x = tail_c(np.abs(p(S, mu, M_u)), eps, k, m, d, tau)
     x = np.abs(p(S, mu, M_u))
-#     s = 20
-#    p_x = e_tail_sp_qgauss(x, M_u, d, k, s, m)
-    
-#    p_x += eps*np.log(1/eps)
+
     p_x[p_x > 1] = 1
     sorted_idx = np.argsort(p_x)
     sorted_p = p_x[sorted_idx]
