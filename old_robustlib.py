@@ -37,16 +37,13 @@ distribution, potentially.
 """
 
 def tail_m(T, eps, k, m, d, tau):
-    return (special.erfc(T/np.sqrt(2)) + (eps**2)/(np.log(k*np.log(m*d/tau))*T**2))
+    return (3*special.erfc(T/np.sqrt(2)) + (eps**2)/(np.log(k*np.log(m*d/tau))*T**2))
 
 def tail_c(T, eps, k, m, d, tau): 
     
     idx = np.nonzero((T < 6))
     v = 3*np.exp(-T/3) + (eps**2/(T*(np.log(T)**2)))
-#     v = (100*eps/(T*(np.log(T)**2)))
     v[idx] = 1
-
-#    return (np.exp(-T) + (3*eps)/(T*(np.log(T)**2)))
     return v
 
 def p(X, mu, M):
@@ -71,7 +68,6 @@ def filter_m_sp(S, indicator, v, u, eps, k, m, d, tau, fdr = 0.1, plot=0, f=0):
     
     m2 = np.median(dots)
     p_x = tail_m(np.abs(dots - m2), eps, k, m, d, tau)
-#    print(len(p_x))
     p_x[p_x > 1] = 1
     
     sorted_idx = np.argsort(p_x)
@@ -79,8 +75,7 @@ def filter_m_sp(S, indicator, v, u, eps, k, m, d, tau, fdr = 0.1, plot=0, f=0):
 
         
     T = l - np.argmin((sorted_p - (fdr/l)*np.arange(l) > 0)[::-1])
-#    if T<=2*np.log(1/eps) or T==l: T = 0
-    if T>3*eps*m: T = 0
+    if T>5*eps*m: T = 0
     
 #    print(p_x.shape)
 #    print(sorted_p.shape)
