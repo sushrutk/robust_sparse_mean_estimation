@@ -128,7 +128,7 @@ class FilterAlgs(object):
             plt.plot(T*np.ones(100), 0.01*np.arange(100), linewidth=3)
             plt.plot(np.arange(l), indicator[sorted_idx], linestyle='-.', linewidth=3)
             plt.plot([0,len(S)],[0,fdr], '--')
-            plt.title("sample size {}, T = {}, True FDR = {}, tail = {}".format(m, T, tfdr, tail.__name__))
+            plt.title("sample size {}, T = {}, True FDR = {}, tail = {}".format(l, T, tfdr, tail.__name__))
             plt.xlabel("Experiments")
             plt.ylabel("p-values")
             plt.figure(f)
@@ -175,6 +175,8 @@ class FilterAlgs(object):
             return np.arange(len(S), 1)
     
     def quadratic_filter(self, M_mask):
+
+        print("Quadratic filter...")
         indicator = self.params.indicator
         l = len(indicator)
         mu_e = np.mean(self.params.S, axis = 0)
@@ -277,8 +279,6 @@ class FilterAlgs(object):
         self.is_sparse = True
         return self.alg()
     
-    
-
 
 def sparse_samp_loss(model_params, keys, m_bounds):
     (Low, Up, step) = m_bounds
