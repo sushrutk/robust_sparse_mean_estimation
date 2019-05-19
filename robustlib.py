@@ -83,6 +83,9 @@ class Params(object):
 class FilterAlgs(object):
     do_plot_linear = True
     do_plot_quadratic = True
+    qfilter = True
+    lfilter = True
+    verbose = True
     figure_no = 0
     fdr = 0.1
     
@@ -124,7 +127,7 @@ class FilterAlgs(object):
             plt.plot(T*np.ones(100), 0.01*np.arange(100), linewidth=3)
             plt.plot(np.arange(l), indicator[sorted_idx], linestyle='-.', linewidth=3)
             plt.plot([0,len(S)],[0,fdr], '--')
-            plt.title("sample size {}, T = {}, True FDR = {}, tail = {}".format(m, T, tfdr, tail))
+            plt.title("sample size {}, T = {}, True FDR = {}, tail = {}".format(m, T, tfdr, tail.__name__))
             plt.xlabel("Experiments")
             plt.ylabel("p-values")
             plt.figure(f)
@@ -147,7 +150,7 @@ class FilterAlgs(object):
         
         return v
 
-    def linear_filter(self, ev, v, u, verbose = False):
+    def linear_filter(self, ev, v, u):
         S = self.params.S
         indicator = self.params.indicator
         eps = self.params.eps
@@ -175,7 +178,8 @@ class FilterAlgs(object):
         else:
             return np.arange(len(S), 1)
     
-    def quadratic_filter(self, M_mask, mu_e, verbose = False): 
+    def quadratic_filter(self, M_mask): 
+        mu_e = np.mean(self.params.S, axis = 0)
         p2 = copy.copy(self.params)        
         p_x = tail_c(np.abs(p(self.params.S, mu_e, M_mask)), p2)
         x = np.abs(p(self.params.S, mu_e, M_mask))
@@ -188,9 +192,10 @@ class FilterAlgs(object):
         self.params.S = self.params.S[idx]
         self.params.indicator = self.params.indicator[idx]
         self.params.m = len(idx)
-        return np.mean(self.params.S, axis=0)
+        return None
     
-    def alg(self, qfilter = False, lfilter = False, verbose = False):
+    def alg(self):
+        
         k = self.params.k
         d = self.params.d
         m = self.params.m
@@ -201,53 +206,58 @@ class FilterAlgs(object):
         med = np.median(self.params.S, axis=0)
         idx = (np.max(np.abs(med-self.params.S), axis=1) < T_naive)
         if len(idx) < self.params.m: print("NP pruned {self.params.m - len(idx) f} points")
-        mu_e = self.update_params(idx)
         
-        if lfilter == False and qfilter == False:
-            return mu_e        
+        while True:
+            if self.lfilter == False and self.qfilter == False:
+                break        
+
+            if len(self.params.S)==0: 
+                print("No points remaining.")
+                return None
+
+            if len(self.params.S)==1: 
+                print("1 point remaining.")
+                return None
+
+            cov_e = np.cov(self.params.S, rowvar=0)
+            M = cov_e - np.identity(d) 
+            (mask, u) = indicat(M, k)
+            M_mask = mask*M
+
+            if LA.norm(M_mask) < eps*np.log(1/eps): 
+                print("Valid output")
+                break
+
+            if self.lfilter == True:
+
+                cov_u = cov_e[np.ix_(u,u)]
+                ev, v = scipy.linalg.eigh(cov_u, eigvals=(k-1,k-1))
+                v = v.reshape(len(v),)
+
+                x = self.params.m
+                idx = self.linear_filter(ev, v, u)
+                self.figure_no += 1
+                self.update_params(idx)
+                if len(idx) < x: continue
+
+            if self.qfilter == True:
+
+                x = self.params.m
+                idx = self.quadratic_filter(M_mask)
+                self.figure_no += 1
+                self.update_params(idx)
+                if len(idx) < x: continue
+
+            if x == len(idx): 
+                print("Neither filter filtered anything.")
+                break
+                    
+        if is_sparse == True:
+            return topk_abs(np.mean(self.params.S, axis=0))
         else:
-
-            while True:
-
-                if len(self.params.S)==0: 
-                    print("No points remaining.")
-                    return None
-
-                if len(self.params.S)==1: 
-                    print("1 point remaining.")
-                    return None
-
-                cov_e = np.cov(self.params.S, rowvar=0)
-                M = cov_e - np.identity(d) 
-                (mask, u) = indicat(M, k)
-                M_mask = mask*M
-
-                if LA.norm(M_mask) < eps*np.log(1/eps): 
-                    print("Valid output")
-                    return topk_abs(mu_e, k)
-
-                if lfilter == True:
-
-                    cov_u = cov_e[np.ix_(u,u)]
-                    ev, v = scipy.linalg.eigh(cov_u, eigvals=(k-1,k-1))
-                    v = v.reshape(len(v),)
-                    x = self.params.m
-                    idx = self.linear_filter(ev, v, u)
-                    self.figure_no += 1
-                    mu_e = self.update_params(idx)
-
-                    if len(idx) < x: continue
-
-                if qfilter == True:
-                    x = self.params.m
-                    idx = self.quadratic_filter(M_mask, mu_e)
-                    self.figure_no += 1
-                    mu_e = self.update_params(idx)
-
-                    if x == len(idx): 
-                        print("Quadratic filter did not filter anything.")
-                        return topk_abs(mu_e, k)
+            return np.mean(self.params.S, axis=0)
             
+        
 
 
 def sparse_samp_loss(model_params, keys, m_bounds):
