@@ -139,7 +139,6 @@ class FilterAlgs(object):
         eps = self.params.eps
         m = self.params.m
         d = self.params.d
-        print(S)
 
         l = len(S)
         p_x = tail(x)
@@ -354,8 +353,9 @@ class plot(RunCollection):
         self.inp = 0
         self.Run = 0
 
-    def get_dataxy(self, xvar_name, bounds):
+    def get_dataxy(self, xvar_name, bounds, y_is_m = False, mrange = 0):
         results = {}
+
         for xvar in np.arange(*bounds):
             if xvar_name == 'm':
                 self.params.m = xvar
@@ -366,22 +366,59 @@ class plot(RunCollection):
             elif xvar_name == 'eps':
                 self.params.eps = xvar
 
-            inp, S, indicator, tm = self.model.generate(self.params)
+            if y_is_m == False:
 
-            O = self.loss(np.mean(S * indicator[...,np.newaxis], axis=0), tm)
-            
-            for f in self.keys:
-                inp_copy = copy.copy(inp)
-                S_copy = S.copy()
-                indicator_copy = indicator.copy()
+                inp, S, indicator, tm = self.model.generate(self.params)
 
-                func = f(inp_copy)
+                O = self.loss(np.mean(S * indicator[...,np.newaxis], axis=0), tm)
                 
-                results.setdefault(f.__name__, []).append(self.loss(func.alg(S_copy, indicator_copy), tm))
-                
-            results.setdefault('oracle', []).append(O)
+                for f in self.keys:
+                    inp_copy = copy.copy(inp)
+                    S_copy = S.copy()
+                    indicator_copy = indicator.copy()
+
+                    func = f(inp_copy)
+
+                    results.setdefault(f.__name__, []).append(self.loss(func.alg(S_copy, indicator_copy), tm))
+                    
+                results.setdefault('oracle', []).append(O)
+
+            else:
+
+                l, s = mrange
+                samp = l
+
+                for f in self.keys:
+                    while True:
+
+                        count = 0
+
+                        for i in range(10):
+
+                            self.params.m = samp
+                            inp, S, indicator, tm = self.model.generate(self.params)
+
+                            func = f(inp)
+
+                            vnew = self.loss(func.alg(S, indicator), tm)
+
+                            print("VNEW ",vnew,"m ",samp,"xvar ",xvar,"count",count)
+                        
+                            # if vnew < 2*self.params.eps:
+                            if vnew < 1.2:
+                                count += 1
+
+                        
+                        if count > 7:
+                            break
+
+                        samp += s
+        
+                    results.setdefault(f.__name__, []).append(samp)
+               
         return results
 
+ 
     def plot_xloss(self, Run, xvar_name, bounds):
         cols = {'RME_sp':'b', 'RME_sp_L':'g', 'RME':'r','ransacGaussianMean':'y' , 'NP_sp':'k'}
         s = len(Run.runs)
@@ -399,8 +436,9 @@ class plot(RunCollection):
         plt.ylabel('MSE/eps')
         plt.legend()
 
-    def setdata(self, xvar_name, bounds, trials, ylims):
-        Runs_l_samples = RunCollection(self.get_dataxy, (xvar_name, bounds))
+
+    def setdata(self, xvar_name, bounds, trials, ylims, y_is_m = False, mrange = []):
+        Runs_l_samples = RunCollection(self.get_dataxy, (xvar_name, bounds, y_is_m, mrange))
         Runs_l_samples.run(trials)
         self.Run = Runs_l_samples
 
