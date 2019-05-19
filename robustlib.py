@@ -47,10 +47,10 @@ class BimodalModel(object):
         pass
     
     def generate(self, d, k, eps, m, tau=0.2):
-        tm = np.zeros(d)
+        tm = np.append(np.ones(k), np.zeros(d-k))
         fm = np.append(np.zeros(d-k), np.ones(k))
 
-        cov = 2*np.identity(d) - np.diag(fm)
+        cov = 2*np.identity(d) - np.diag(tm)
 
         G = np.random.randn(m, d) + tm
         G2 = np.random.multivariate_normal(np.zeros(d), cov, (m,))
@@ -259,7 +259,25 @@ class FilterAlgs(object):
         else:
             return np.mean(self.params.S, axis=0)
             
-        
+    def NP_sp(self):
+        self.qfilter = False
+        self.lfilter = False
+        self.is_sparse = True
+        return self.alg()
+
+    def RME_sp(self):
+        self.qfilter = True
+        self.lfilter = True
+        self.is_sparse = True
+        return self.alg()
+
+    def RME_sp_L(self):
+        self.qfilter = False
+        self.lfilter = True
+        self.is_sparse = True
+        return self.alg()
+    
+    
 
 
 def sparse_samp_loss(model_params, keys, m_bounds):
