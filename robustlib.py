@@ -162,11 +162,11 @@ class FilterAlgs(object):
             p2.S = S[np.ix_(np.arange(x),u)]
             p2.indicator = indicator
             
-            dots = self.params.S.dot(v)
+            dots = p2.S.dot(v)
             m2 = np.median(dots)
             x = np.abs(dots - m2) - 3*np.sqrt(eps*ev)
             
-            idx = drop_points(p2, x, fdr = self.fdr, plot = self.do_plot_linear, f = self.figure_no)  
+            idx = self.drop_points(p2, x, fdr = self.fdr, plot = self.do_plot_linear, f = self.figure_no)  
             
             if verbose:
                 bad_filtered = np.sum(indicator) - np.sum(indicator[idx])
@@ -177,10 +177,10 @@ class FilterAlgs(object):
     
     def quadratic_filter(self, M_mask, mu_e, verbose = False): 
         p2 = copy.copy(self.params)        
-        p_x = tail_c(np.abs(p(S, mu, M_u)), params)
+        p_x = tail_c(np.abs(p(S, mu, M_u)), p2)
         x = np.abs(p(S, mu, M_u))
 
-        idx = drop_points(p2, x, fdr = self.fdr, plot = self.do_plot_quadratic, f = self.figure_no)
+        idx = self.drop_points(p2, x, fdr = self.fdr, plot = self.do_plot_quadratic, f = self.figure_no)
                 
         return idx
     
@@ -200,7 +200,7 @@ class FilterAlgs(object):
         T_naive = np.sqrt(2*np.log(m*d/tau))
         med = np.median(self.params.S, axis=0)
         idx = (np.max(np.abs(med-self.params.S), axis=1) < T_naive)
-        
+        if len(idx) < self.params.m: print("NP pruned {self.params.m - len(idx) f} points")
         mu_e = self.update_params(idx)
         
         if lfilter == False and qfilter == False:
