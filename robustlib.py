@@ -80,6 +80,175 @@ class Params(object):
         self.S = S
         self.indicator = indicator
         
+class FilterAlgs(object):
+    do_plot_linear = True
+    do_plot_quadratic = True
+    figure_no = 0
+    fdr = 0.1
+    
+    
+    def __init__(self, params):
+        self.params = params
+        pass
+    
+    
+    
+    """ Tail estimates """
+    
+    def drop_points(params, x, tail, fdr = 0.1, plot = False, f = 0):
+        S = params.S
+        indicator = params.indicator
+        eps = params.eps
+        m = params.m
+        d = params.d
+
+        l = len(S)
+        p_x = tail(x, params)
+        p_x[p_x > 1] = 1
+
+        sorted_idx = np.argsort(p_x)
+        sorted_p = p_x[sorted_idx]
+
+        T = l - np.argmin((sorted_p - (fdr/l)*np.arange(l) > 0)[::-1])
+        if T > 0.51*m : T = 0
+
+        idx = np.nonzero((p_x >= sorted_p[T]))
+
+        if len(S)==len(idx[0]):
+            tfdr = 0
+        else:
+            tfdr = (sum(indicator) - sum(indicator[idx]))/(len(S)-len(idx[0]))
+
+        if plot==True:
+            plt.plot(np.arange(l), sorted_p)
+            plt.plot(T*np.ones(100), 0.01*np.arange(100), linewidth=3)
+            plt.plot(np.arange(l), indicator[sorted_idx], linestyle='-.', linewidth=3)
+            plt.plot([0,len(S)],[0,fdr], '--')
+            plt.title("sample size {}, T = {}, True FDR = {}, tail = {}".format(m, T, tfdr, tail))
+            plt.xlabel("Experiments")
+            plt.ylabel("p-values")
+            plt.figure(f)
+
+        return idx
+
+    def tail_m(self, T):
+        
+        eps, k, m, d, tau = self.params.eps, self.params.k, self.params.m, self.params.d, self.params.tau 
+        
+        return (special.erfc(T/np.sqrt(2)) + (eps**2)/(np.log(k*np.log(m*d/tau))*T**2))
+
+    def tail_c(self, T): 
+        
+        eps, k, m, d, tau = self.params.eps, self.params.k, self.params.m, self.params.d, self.params.tau    
+
+        idx = np.nonzero((T < 6))
+        v = 3*np.exp(-T/3) + (eps**2/(T*(np.log(T)**2)))
+        v[idx] = 1
+        
+        return v
+
+    def linear_filter(self, ev, v, u, verbose = False):
+        S = self.params.S
+        indicator = self.params.indicator
+        eps = self.params.eps
+        
+        if ev > 1 + eps*np.sqrt(np.log(1/eps)): 
+            if verbose:
+                print("Linear filter...")
+
+            x = len(S)
+            
+            p2 = copy.copy(self.params)
+            p2.S = S[np.ix_(np.arange(x),u)]
+            p2.indicator = indicator
+            
+            dots = self.params.S.dot(v)
+            m2 = np.median(dots)
+            x = np.abs(dots - m2) - 3*np.sqrt(eps*ev)
+            
+            idx = drop_points(p2, x, fdr = self.fdr, plot = self.do_plot_linear, f = self.figure_no)  
+            
+            if verbose:
+                bad_filtered = np.sum(indicator) - np.sum(indicator[idx])
+                print(f"Filtered out {x - len(idx[0])}/{x}, {bad_filtered} false ({bad_filtered / (x - len(idx[0])):0.2f} vs {fdr})")
+            return idx
+        else:
+            return np.arange(len(S), 1)
+    
+    def quadratic_filter(self, M_mask, mu_e, verbose = False): 
+        p2 = copy.copy(self.params)        
+        p_x = tail_c(np.abs(p(S, mu, M_u)), params)
+        x = np.abs(p(S, mu, M_u))
+
+        idx = drop_points(p2, x, fdr = self.fdr, plot = self.do_plot_quadratic, f = self.figure_no)
+                
+        return idx
+    
+    def update_params(self, idx):
+        self.params.S = self.params.S[idx]
+        self.params.indicator = self.params.indicator[idx]
+        self.params.m = len(idx)
+        return np.mean(self.params.S, axis=0)
+    
+    def alg(self, qfilter = False, lfilter = False, verbose = False):
+        k = self.params.k
+        d = self.params.d
+        m = self.params.m
+        eps = self.params.eps
+        tau = self.params.tau
+        
+        T_naive = np.sqrt(2*np.log(m*d/tau))
+        med = np.median(self.params.S, axis=0)
+        idx = (np.max(np.abs(med-self.params.S), axis=1) < T_naive)
+        
+        mu_e = self.update_params(idx)
+        
+        if lfilter == False and qfilter == False:
+            return mu_e        
+        else:
+
+            while True:
+
+                if len(self.params.S)==0: 
+                    print("No points remaining.")
+                    return None
+
+                if len(self.params.S)==1: 
+                    print("1 point remaining.")
+                    return None
+
+                cov_e = np.cov(self.params.S, rowvar=0)
+                M = cov_e - np.identity(d) 
+                (mask, u) = indicat(M, k)
+                M_mask = mask*M
+
+                if LA.norm(M_mask) < eps*np.log(1/eps): 
+                    print("Valid output")
+                    return topk_abs(mu_e, k)
+
+                if lfilter == True:
+
+                    cov_u = cov_e[np.ix_(u,u)]
+                    ev, v = scipy.linalg.eigh(cov_u, eigvals=(k-1,k-1))
+                    v = v.reshape(len(v),)
+                    x = self.params.m
+                    idx = self.linear_filter(ev, v, u)
+                    self.figure_no += 1
+                    mu_e = self.update_params(idx)
+
+                    if len(idx) < x: continue
+
+                if qfilter == True:
+                    x = self.params.m
+                    idx = self.quadratic_filter(M_mask, mu_e)
+                    self.figure_no += 1
+                    mu_e = self.update_params(idx)
+
+                    if x == len(idx): 
+                        print("Quadratic filter did not filter anything.")
+                        return topk_abs(mu_e, k)
+            
+
 
 def sparse_samp_loss(model_params, keys, m_bounds):
     (Low, Up, step) = m_bounds
@@ -90,7 +259,8 @@ def sparse_samp_loss(model_params, keys, m_bounds):
         d, k, eps = model_params
         model = BimodalModel()
         params, tm = model.generate(d, k, eps, m)
-        O = LA.norm(tm - np.mean(params.S * params.indicator, axis=0))
+        
+        O = LA.norm(tm - np.mean(params.S * params.indicator[...,np.newaxis], axis=0))
         
         for f in keys:
             results.setdefault(f.__name__, []).append(LA.norm(tm - f(params))/eps)
@@ -99,76 +269,6 @@ def sparse_samp_loss(model_params, keys, m_bounds):
         results.setdefault('eps', []).append(1)
     
     return results
-
-
-
-
-#             params = (S.copy(), indicator, k, eps, 0.2)
-#             if f == RME:
-#                 params = (G.copy(), S.copy(), indicator, m, d, eps, 0.2)
-#             if f == RME:
-#                 mu_o = f(params)
-#                 if mu_o.__class__.__name__ != 'int':
-#                     u2 = np.argpartition(mu_o, -k)[-k:]
-#                     z = np.zeros(len(mu_o))
-#                     z[u2] = mu_o[u2]
-#                     results.setdefault(f.__name__, []).append(LA.norm(tm - z)/eps)
-#                 else:
-#                     results.setdefault(f.__name__, []).append(LA.norm(tm - f(params))/eps)
-                    
-#             else: 
-
-
-        
-        
-#         m = samp
-        
-#         tm = np.append(np.ones(k), np.zeros(d-k))
-#         fm = np.append(np.zeros(d-k), np.ones(k))
-
-#         cov = 2*np.identity(d) - np.diag(tm)
-# #         tm = tm/LA.norm(tm)
-
-#         G = np.random.randn(m, d) + tm
-#         G2 = np.random.multivariate_normal(np.zeros(d), cov, (m,))
-# #         G1 = np.random.multivariate_normal(np.zeros(d), cov, (m,))
-#         G1 = np.random.randn(m, d) + fm
-
-#         S = G.copy()
-
-#         indicator = np.zeros(len(S))
-#         L = int(m*(1-eps))
-#         M = int((L + m)/2)
-#         print(m-L)
-
-#         S[L:M] = G1[L:M]
-#         S[M:] = G2[M:]
-
-#         indicator = np.ones(len(S))
-#         indicator[int(m*(1-eps)):] = 0
-
-#         true_mean = np.append(np.ones(k),np.zeros(d-k))
-#         false_mean = np.append(np.zeros(d-k), np.ones(k))
-# #         false_mean = np.ones(d)
-
-#         G = np.random.randn(m, d) + true_mean
-
-#         S = G.copy()
-# #         S[int(m*(1-eps)):] += dist*false_mean + true_mean
-#         S[int(m*(1-eps)):] = true_mean + dist
-#         indicator = np.ones(len(S))
-#         indicator[int(m*(1-eps)):] = 0
-#         params = (S.copy(), indicator, k, eps, 0.2)
-
-
-        # for func in [RME_sp, NP_sp]:
-        # ... func(params)
-        # Option 1: set RME_sp.name = 'RME_sp' somewhere, use func.name
-        # Option 2: func.__name__
-
-#         for f in [rl.RME_sp_L, rl.NP_sp]:
-#             results.setdefault(f.__name__, []).append(LA.norm(true_mean - f(params))/eps)
-
 
 def plot_l_samples(Run, keys):
     cols = {'RME_sp':'b', 'RME_sp_L':'g', 'RME':'r','ransacGaussianMean':'y' , 'NP_sp':'g'}
@@ -186,20 +286,11 @@ def plot_l_samples(Run, keys):
     plt.ylabel('MSE/eps')
     plt.legend()
 
-""" Tail estimates """
 
-def tail_m(T, params):
-    eps, k, m, d, tau = params.eps, params.k, params.m, params.d, params.tau    
+""" Filters """
 
-    return (special.erfc(T/np.sqrt(2)) + (eps**2)/(np.log(k*np.log(m*d/tau))*T**2))
 
-def tail_c(T, params): 
-    eps, k, m, d, tau = params.eps, params.k, params.m, params.d, params.tau    
-
-    idx = np.nonzero((T < 6))
-    v = 3*np.exp(-T/3) + (eps**2/(T*(np.log(T)**2)))
-    v[idx] = 1
-    return v
+""" Auxillary functions """
 
 """ P(x) for quadratic filter """
 
@@ -207,121 +298,7 @@ def p(X, mu, M):
     F = LA.norm(M)
     D = X - mu
     vec = (D.dot(M) * D).sum(axis=1)
-    return (vec - np.trace(M.T.dot(M)))/F
-
-
-""" Filters """
-
-def filter_m_sp(params, ev, v, fdr = 0.1, plot = 0, f = 0):
-    """This filters elements of S whenever the 
-    deviation of <x, v> from the median 
-    is more than reasonable. 
-    """
-    S = params.S
-    indicator = params.indicator
-    eps = params.eps
-    m = params.m
-    d = params.d
-
-    l = len(S)
-    dots = S.dot(v)
-    m2 = np.median(dots)
-
-    x = np.abs(dots - m2) - 3*np.sqrt(eps*ev)
-    p_x = tail_m(np.abs(dots - m2), params)
-    p_x[p_x > 1] = 1
-    
-    sorted_idx = np.argsort(p_x)
-    sorted_p = p_x[sorted_idx]
-
-        
-    T = l - np.argmin((sorted_p - (fdr/l)*np.arange(l) > 0)[::-1])
-    if T > 0.51*m : T = 0
-
-    idx = np.nonzero((p_x >= sorted_p[T]))
-    
-    if len(S)==len(idx[0]):
-        tfdr = 0
-    else:
-        tfdr = (sum(indicator) - sum(indicator[idx]))/(len(S)-len(idx[0]))
-        
-    if plot==1:
-        plt.plot(np.arange(l), sorted_p)
-        plt.plot(T*np.ones(100), 0.01*np.arange(100), linewidth=3)
-        plt.plot(np.arange(l), indicator[sorted_idx], linestyle='-.', linewidth=3)
-        plt.plot([0,len(S)],[0,fdr], '--')
-        plt.title("Linear filter: sample size {}, T = {}, True FDR = {}".format(m, T, tfdr))
-        plt.xlabel("Experiments")
-        plt.ylabel("p-values")
-        plt.figure(f)
-        
-    return idx
-
-def filter_c_sp(params, M_u, mu, fdr = 0.1, plot = 0, f = 0):
-    
-    """
-    This filters elements of S whenever the 
-    degree 2 polynomial p(X) is larger
-    than reasonable.
-    """
-
-    S = params.S
-    indicator = params.indicator
-    eps = params.eps
-    k = params.k
-    tau = params.tau
-    
-    l = len(S)
-    m, d = S.shape
-    p_x = tail_c(np.abs(p(S, mu, M_u)), params)
-    x = np.abs(p(S, mu, M_u))
-
-    p_x[p_x > 1] = 1
-    sorted_idx = np.argsort(p_x)
-    sorted_p = p_x[sorted_idx]
-
-    T = l - np.argmin((sorted_p - (fdr/l)*np.arange(l) > 0.01)[::-1])
-#     print((sorted_p - (fdr/l)*np.arange(l) > 0)[::-1])
-#     print((fdr/l)*np.arange(l))
-    if T==l: T = 0
-    print("T = ", T)
-    
-    idx = np.nonzero((p_x >= sorted_p[T] ))
-    if len(S)==len(idx[0]):
-        tfdr = 0
-    else:
-        tfdr = (sum(indicator) - sum(indicator[idx]))/(len(S)-len(idx[0]))
-
-    if plot==1:
-        plt.plot(np.arange(l), sorted_p)
-        plt.plot(T*np.ones(100), 0.01*np.arange(100), linewidth=3)
-        plt.plot(np.arange(l), indicator[sorted_idx], linestyle='-.',linewidth=3)
-        plt.plot([0,len(S)],[0,fdr], '--')
-        plt.title("Quadratic Filter: sample size {}, T = {}, True FDR = {}".format(m, T, tfdr))
-        plt.xlabel("Experiments")
-        plt.ylabel("p-values")
-        plt.figure(f)
-
-    return idx
-
-""" Auxillary functions """
-
-""" Naive Prune """
-
-def NP(params):
-    
-    k = params.k
-    eps = params.eps
-    tau = params.tau
-    m = params.m
-    d = params.d
-    
-    T_naive = np.sqrt(2*np.log(m*d/tau))
-   
-    med = np.median(params.S, axis=0)
-    idx = (np.max(np.abs(med-params.S), axis=1) < T_naive)
-    
-    return(idx)
+    return (vec - np.trace(M))/F
 
 
 
@@ -354,100 +331,6 @@ def topk_abs(v, k):
     z = np.zeros(len(v))
     z[u] = v[u]
     return z
-
-""" RME algorithms """ 
-
-def NPmean_sp(params):
-    k = params.k
-    S = params.S
-    
-    S = S[NP(params)]
-    mean = np.mean(S, axis=0)
-
-    if m > len(S): print("NP_sp pruned!")
-
-    return topk_abs(mean, k) 
-
-def RME_sp(params, plotl = 0, plotc = 0, f = 0, fdr=0.2, verbose=False):
-    k = params.k
-    d = params.d
-    m = params.m
-    eps = params.eps
-    tau = params.tau
-    S = params.S
-    indicator = params.indicator
-    
-    idx = NP(params)
-    
-    S = S[idx]
-    indicator = indicator[idx]
-
-    mu_e = np.mean(S, axis=0) 
-
-    while True:
-        
-        if len(S)==0: 
-            print("No points remaining.")
-            return topk_abs(mu_e, k)
-
-        if len(S)==1: 
-            print("1 point remaining.")
-            return topk_abs(mu_e, k)
-                
-        mu_e = np.mean(params.S, axis=0)
-        cov_e = np.cov(params.S, rowvar=0)
-        
-        M = cov_e - np.identity(d) 
-        (mask, u) = indicat(M, k)
-        M_mask = mask*M
-
-        if LA.norm(M_mask) < eps*np.log(1/eps): 
-            print("Valid output")
-            return topk_abs(mu_e, k)
-        
-        cov_u = cov_e[np.ix_(u,u)]
-        ev, v = scipy.linalg.eigh(cov_u, eigvals=(k-1,k-1))
-        v = v.reshape(len(v),)
-                
-        if ev > 1 + eps*np.sqrt(np.log(1/eps)): 
-            if verbose:
-                print("Linear filter...")
-
-            x = len(S)
-            p2 = copy.copy(params)
-            p2.S = S[np.ix_(np.arange(x),u)]
-            p2.indicator = indicator
-            
-            idx = filter_m_sp(p2, ev, v, fdr = fdr, plot=plotl, f=f)
-            
-            if verbose:
-                bad_filtered = np.sum(indicator) - np.sum(indicator[idx])
-#                 print(f"Filtered out {x - len(idx[0])}/{x}, {bad_filtered} false ({bad_filtered / (x - len(idx[0])):0.2f} vs {fdr})")
-            f+=1
-            S =  S[idx]
-            params.indicator = params.indicator[idx]
-            if len(S) < x:
-                continue
-
-        mu_e = np.mean(S, axis=0)
-
-        print("Quadratic filter.")
-        x = len(S)
-        p2 = copy.copy(params)
-        p2.S = S
-        p2.indicator = indicator
-        p2.m = x
-        
-        idx = filter_c_sp(p2, M_mask, mu_e, fdr = fdr, plot=plotc, f=f)
-        f+=1
-
-        S =  p2.S[idx]
-        indicator = p2.indicator[idx]
-        m = len(S)
-
-        if x == m: 
-            print("Quadratic filter did not filter anything.")
-            return topk_abs(mu_e, k)
         
 def ransacGaussianMean(params):
     k = params.k
