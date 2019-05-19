@@ -17,6 +17,23 @@ class RunCollection(object):
         for i in range(trials):
             self.runs.append(self.func(*self.inp))
 
+
+def get_error(f, params, tm):
+    return LA.norm(tm - f(params))
+
+""" Parameter object for noise models """
+
+class Params(object):
+    def __init__(self, d = 0, m = 0, eps = 0, k = 0, tau = 0.2):
+        self.d = d
+        self.m = m
+        self.eps = eps
+        self.k = k
+        self.tau = tau
+
+
+""" Noise models """
+
 class DenseNoiseModel(object):
     def __init__(self, dist):
         self.dist = dist
@@ -38,8 +55,6 @@ class DenseNoiseModel(object):
         params = Params(d,m,eps,k,tau)
         return params, S, indicator, tm
 
-def get_error(f, params, tm):
-    return LA.norm(tm - f(params))
 
 
 class BimodalModel(object):
@@ -71,15 +86,36 @@ class BimodalModel(object):
         params = Params(d,m,eps,k,tau)
         return params, S, indicator, tm
 
+class TailFilpModel(object):
+    def __init__(self):
+        pass
 
-class Params(object):
-    def __init__(self, d = 0, m = 0, eps = 0, k = 0, tau = 0.2):
-        self.d = d
-        self.m = m
-        self.eps = eps
-        self.k = k
-        self.tau = tau
+    def generate(self, params):
+        eps, m, d, k = params.eps, params.m, params.d, params.k
+
+        tm = 0
+        G = np.random.randn(m, d)
+        S = G.copy()
+
+        v = np.random.randn(k)
+        v = np.append(v, np.zeros(d-k))
+        np.random.shuffle(v)
+
+        Sdots = S.dot(v)
+        idx = np.argsort(Sdots)
+        S = S[idx]
+
+        S[:int(eps*m)] = -S[:int(eps*m)]
         
+        indicator = np.ones(m)
+        indicator[:int(eps*m)] = 0
+
+        return params, S, indicator, tm
+
+
+        
+""" Algorithms """
+
 class FilterAlgs(object):
     do_plot_linear = False
     do_plot_quadratic = False
@@ -103,6 +139,7 @@ class FilterAlgs(object):
         eps = self.params.eps
         m = self.params.m
         d = self.params.d
+        print(S)
 
         l = len(S)
         p_x = tail(x)
@@ -211,11 +248,11 @@ class FilterAlgs(object):
 
             if len(S)==0: 
                 print("No points remaining.")
-                return None
+                return 0
 
             if len(S)==1: 
                 print("1 point remaining.")
-                return None
+                return 0
 
             cov_e = np.cov(S, rowvar=0)
             M = cov_e - np.identity(d) 
@@ -315,6 +352,7 @@ class plot(RunCollection):
         self.model = model
         self.loss = loss
         self.inp = 0
+        self.Run = 0
 
     def get_dataxy(self, xvar_name, bounds):
         results = {}
@@ -327,13 +365,19 @@ class plot(RunCollection):
                 self.params.d = xvar
             elif xvar_name == 'eps':
                 self.params.eps = xvar
+
             inp, S, indicator, tm = self.model.generate(self.params)
 
             O = self.loss(np.mean(S * indicator[...,np.newaxis], axis=0), tm)
             
             for f in self.keys:
-                func = f(inp)
-                results.setdefault(f.__name__, []).append(self.loss(func.alg(S, indicator), tm))
+                inp_copy = copy.copy(inp)
+                S_copy = S.copy()
+                indicator_copy = indicator.copy()
+
+                func = f(inp_copy)
+                
+                results.setdefault(f.__name__, []).append(self.loss(func.alg(S_copy, indicator_copy), tm))
                 
             results.setdefault('oracle', []).append(O)
         return results
@@ -355,35 +399,38 @@ class plot(RunCollection):
         plt.ylabel('MSE/eps')
         plt.legend()
 
-    def plotxy(self, xvar_name, bounds, trials, ylims):
+    def setdata(self, xvar_name, bounds, trials, ylims):
         Runs_l_samples = RunCollection(self.get_dataxy, (xvar_name, bounds))
         Runs_l_samples.run(trials)
-        print(xvar_name)
-        self.plot_xloss(Runs_l_samples, xvar_name, bounds)
+        self.Run = Runs_l_samples
+
+
+    def plotxy(self, xvar_name, bounds, ylims):
+        self.plot_xloss(self.Run, xvar_name, bounds)
         plt.ylim(*ylims)
         plt.figure()
 
-
-def sparse_samp_loss(noise_model, model_params, keys, m_bounds):
-    (Low, Up, step) = m_bounds
+# def sparse_samp_loss(noise_model, model_params, keys, m_bounds):
+#     (Low, Up, step) = m_bounds
     
-    results = {}
+#     results = {}
 
-    for m in np.arange(Low, Up, step):
-        model_params.m = m
-        params, S, indicator, tm = noise_model.generate(model_params)
+#     for m in np.arange(Low, Up, step):
+#         model_params.m = m
+#         params, S, indicator, tm = noise_model.generate(model_params)
         
-        O = LA.norm(tm - np.mean(S * indicator[...,np.newaxis], axis=0))
+#         O = LA.norm(tm - np.mean(S * indicator[...,np.newaxis], axis=0))
         
-        for f in keys:
-            func = f(params)
-            results.setdefault(f.__name__, []).append(LA.norm(tm - func.alg(S, indicator))/model_params.eps)
+#         for f in keys:
+#             func = f(params)
+#             results.setdefault(f.__name__, []).append(LA.norm(tm - func.alg(S, indicator))/model_params.eps)
             
-        results.setdefault('oracle', []).append(O/model_params.eps)
-        results.setdefault('eps', []).append(1)
+#         results.setdefault('oracle', []).append(O/model_params.eps)
+#         results.setdefault('eps', []).append(1)
     
-    return results
+#     return results
 
+# 
 # import json
 
 # def plot_l_samples(Run, keys):
