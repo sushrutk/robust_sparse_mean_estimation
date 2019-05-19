@@ -95,7 +95,7 @@ class FilterAlgs(object):
     
     """ Tail estimates """
     
-    def drop_points(params, x, tail, fdr = 0.1, plot = False, f = 0):
+    def drop_points(self, params, x, tail, fdr = 0.1, plot = False, f = 0):
         S = params.S
         indicator = params.indicator
         eps = params.eps
@@ -166,7 +166,7 @@ class FilterAlgs(object):
             m2 = np.median(dots)
             x = np.abs(dots - m2) - 3*np.sqrt(eps*ev)
             
-            idx = self.drop_points(p2, x, fdr = self.fdr, plot = self.do_plot_linear, f = self.figure_no)  
+            idx = self.drop_points(p2, x, tail_m, self.fdr, self.do_plot_linear, self.figure_no)  
             
             if verbose:
                 bad_filtered = np.sum(indicator) - np.sum(indicator[idx])
@@ -177,10 +177,10 @@ class FilterAlgs(object):
     
     def quadratic_filter(self, M_mask, mu_e, verbose = False): 
         p2 = copy.copy(self.params)        
-        p_x = tail_c(np.abs(p(S, mu, M_u)), p2)
-        x = np.abs(p(S, mu, M_u))
+        p_x = tail_c(np.abs(p(self.params.S, mu_e, M_mask)), p2)
+        x = np.abs(p(self.params.S, mu_e, M_mask))
 
-        idx = self.drop_points(p2, x, fdr = self.fdr, plot = self.do_plot_quadratic, f = self.figure_no)
+        idx = self.drop_points(p2, x, tail_c, self.fdr, self.do_plot_quadratic, self.figure_no)
                 
         return idx
     
