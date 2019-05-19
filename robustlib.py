@@ -291,20 +291,20 @@ def sparse_samp_loss(noise_model, model_params, keys, m_bounds):
     
     return results
 
+import json
+
 def plot_l_samples(Run, keys):
     cols = {'RME_sp':'b', 'RME_sp_L':'g', 'RME':'r','ransacGaussianMean':'y' , 'NP_sp':'g'}
     s = len(Run.runs)
     for key in keys:
         A = np.array([res[key] for res in Run.runs])
         xs = np.arange(*Run.bounds)
-        xs = xs.tolist()
-
-        plt.plot(xs, np.median(A,axis = 0), label=key, color = cols[key])
-
         mins = [np.sort(x)[int(s*0.25)] for x in A.T]
         maxs = [np.sort(x)[int(s*0.75)] for x in A.T]
 
         plt.fill_between(xs, mins, maxs, color = cols[key], alpha=0.2)
+        plt.plot(xs, np.median(A,axis = 0), label=key, color = cols[key])
+
 
     plt.title(f'd = {Run.params.d}, k = {Run.params.k}, eps = {Run.params.eps}')
     plt.xlabel('m')
