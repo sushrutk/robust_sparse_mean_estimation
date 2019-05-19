@@ -8,22 +8,25 @@ import mpld3
 mpld3.enable_notebook()
 
 class RunCollection(object):
-    def __init__(self, func, params, bounds = 0, keys = []):
+    def __init__(self, func, model, params, bounds = 0, keys = []):
         self.runs = []
         self.func = func
         self.params = params
         self.bounds = bounds
         self.keys = keys
+        self.model = model
         
     def run(self, trials):
         for i in range(trials):
-            self.runs.append(self.func(self.params, self.keys, self.bounds))
+            self.runs.append(self.func(self.model, self.params, self.keys, self.bounds))
 
 class DenseNoiseModel(object):
     def __init__(self, dist):
         self.dist = dist
 
-    def generate(self, d, k, eps, m, tau=0.2):
+    def generate(self, params):
+        d, k, eps, m, tau = params.d, params.k, params.eps, params.m, params.tau
+
         tm = np.append(np.ones(k), np.zeros(d-k))
 
         G = np.random.randn(m, d) + tm
@@ -35,8 +38,8 @@ class DenseNoiseModel(object):
 
         indicator = np.ones(len(S))
         indicator[L:] = 0
-        params = Params(d,m,eps,k,tau,S,indicator)
-        return params, tm
+        params = Params(d,m,eps,k,tau)
+        return params, S, indicator, tm
 
 def get_error(f, params, tm):
     return LA.norm(tm - f(params))
@@ -46,7 +49,9 @@ class BimodalModel(object):
     def __init__(self):
         pass
     
-    def generate(self, d, k, eps, m, tau=0.2):
+    def generate(self, params):
+        d, k, eps, m, tau = params.d, params.k, params.eps, params.m, params.tau
+
         tm = np.append(np.ones(k), np.zeros(d-k))
         fm = np.append(np.zeros(d-k), np.ones(k))
 
@@ -66,23 +71,21 @@ class BimodalModel(object):
 
         indicator = np.ones(len(S))
         indicator[L:] = 0
-        params = Params(d,m,eps,k,tau,S,indicator)
-        return params, tm
+        params = Params(d,m,eps,k,tau)
+        return params, S, indicator, tm
 
 
 class Params(object):
-    def __init__(self, d, m, eps, k, tau, S, indicator):
+    def __init__(self, d = 0, m = 0, eps = 0, k = 0, tau = 0.2):
         self.d = d
         self.m = m
         self.eps = eps
         self.k = k
         self.tau = tau
-        self.S = S
-        self.indicator = indicator
         
 class FilterAlgs(object):
-    do_plot_linear = True
-    do_plot_quadratic = True
+    do_plot_linear = False
+    do_plot_quadratic = False
     qfilter = True
     lfilter = True
     verbose = True
@@ -99,9 +102,7 @@ class FilterAlgs(object):
     
     """ Tail estimates """
     
-    def drop_points(self, x, tail, fdr = 0.1, plot = False, f = 0):
-        S = self.params.S
-        indicator = self.params.indicator
+    def drop_points(self, S, indicator, x, tail, fdr = 0.1, plot = False, f = 0):
         eps = self.params.eps
         m = self.params.m
         d = self.params.d
@@ -151,9 +152,7 @@ class FilterAlgs(object):
         
         return v
 
-    def linear_filter(self, ev, v, u):
-        S = self.params.S
-        indicator = self.params.indicator
+    def linear_filter(self, S, indicator, ev, v, u):
         eps = self.params.eps
         
         if ev > 1 + eps*np.sqrt(np.log(1/eps)): 
@@ -165,7 +164,7 @@ class FilterAlgs(object):
             m2 = np.median(dots)
             x = np.abs(dots - m2) - 3*np.sqrt(eps*ev)
             
-            idx = self.drop_points(x, self.tail_m, self.fdr, self.do_plot_linear, self.figure_no)  
+            idx = self.drop_points(S, indicator, x, self.tail_m, self.fdr, self.do_plot_linear, self.figure_no)  
             
             if self.verbose:
                 bad_filtered = np.sum(indicator) - np.sum(indicator[idx])
@@ -174,15 +173,14 @@ class FilterAlgs(object):
         else:
             return np.arange(len(S), 1)
     
-    def quadratic_filter(self, M_mask):
+    def quadratic_filter(self, S, indicator, M_mask):
 
         print("Quadratic filter...")
-        indicator = self.params.indicator
         l = len(indicator)
-        mu_e = np.mean(self.params.S, axis = 0)
-        x = np.abs(p(self.params.S, mu_e, M_mask))
+        mu_e = np.mean(S, axis = 0)
+        x = np.abs(p(S, mu_e, M_mask))
 
-        idx = self.drop_points(x, self.tail_c, self.fdr, self.do_plot_quadratic, self.figure_no)
+        idx = self.drop_points(S, indicator, x, self.tail_c, self.fdr, self.do_plot_quadratic, self.figure_no)
         
         if self.verbose:
             bad_filtered = np.sum(indicator) - np.sum(indicator[idx])
@@ -191,13 +189,12 @@ class FilterAlgs(object):
         else:
             return np.arange(len(S), 1)
     
-    def update_params(self, idx):
-        self.params.S = self.params.S[idx]
-        self.params.indicator = self.params.indicator[idx]
+    def update_params(self, S, indicator, idx):
+        S, indicator = S[idx], indicator[idx]
         self.params.m = len(idx)
-        return None
+        return S, indicator
     
-    def alg(self):
+    def alg(self, S, indicator):
         
         k = self.params.k
         d = self.params.d
@@ -206,8 +203,8 @@ class FilterAlgs(object):
         tau = self.params.tau
         
         T_naive = np.sqrt(2*np.log(m*d/tau))
-        med = np.median(self.params.S, axis=0)
-        idx = (np.max(np.abs(med-self.params.S), axis=1) < T_naive)
+        med = np.median(S, axis=0)
+        idx = (np.max(np.abs(med-S), axis=1) < T_naive)
         
         if len(idx) < self.params.m: print("NP pruned {self.params.m - len(idx) f} points")
         
@@ -215,15 +212,15 @@ class FilterAlgs(object):
             if self.lfilter == False and self.qfilter == False:
                 break        
 
-            if len(self.params.S)==0: 
+            if len(S)==0: 
                 print("No points remaining.")
                 return None
 
-            if len(self.params.S)==1: 
+            if len(S)==1: 
                 print("1 point remaining.")
                 return None
 
-            cov_e = np.cov(self.params.S, rowvar=0)
+            cov_e = np.cov(S, rowvar=0)
             M = cov_e - np.identity(d) 
             (mask, u) = indicat(M, k)
             M_mask = mask*M
@@ -239,17 +236,17 @@ class FilterAlgs(object):
                 v = v.reshape(len(v),)
 
                 x = self.params.m
-                idx = self.linear_filter(ev, v, u)
+                idx = self.linear_filter(S, indicator, ev, v, u)
                 self.figure_no += 1
-                self.update_params(idx)
+                S, indicator =  self.update_params(S, indicator, idx)
                 if len(idx) < x: continue
 
             if self.qfilter == True:
 
                 x = self.params.m
-                idx = self.quadratic_filter(M_mask)
+                idx = self.quadratic_filter(S, indicator, M_mask)
                 self.figure_no += 1
-                self.update_params(idx)
+                S, indicator =  self.update_params(S, indicator, idx)
                 if len(idx) < x: continue
 
             if x == len(idx): 
@@ -257,45 +254,39 @@ class FilterAlgs(object):
                 break
                     
         if self.is_sparse == True:
-            return topk_abs(np.mean(self.params.S, axis=0), k)
+            return topk_abs(np.mean(S, axis=0), k)
         else:
-            return np.mean(self.params.S, axis=0)
+            return np.mean(S, axis=0)
             
-    def NP_sp(self):
-        self.qfilter = False
-        self.lfilter = False
-        self.is_sparse = True
-        return self.alg()
+class NP_sp(FilterAlgs):
+    lfilter, qfilter = False, False
 
-    def RME_sp(self):
-        self.qfilter = True
-        self.lfilter = True
-        self.is_sparse = True
-        return self.alg()
+class RME_sp(FilterAlgs):
+    lfilter, qfilter = True, True
 
-    def RME_sp_L(self):
-        self.qfilter = False
-        self.lfilter = True
-        self.is_sparse = True
-        return self.alg()
-    
+class RME_sp_L(FilterAlgs):
+    lfilter, qfilter = False, True
 
-def sparse_samp_loss(model_params, keys, m_bounds):
+
+
+def sparse_samp_loss(noise_model, model_params, keys, m_bounds):
     (Low, Up, step) = m_bounds
     
     results = {}
 
     for m in np.arange(Low, Up, step):
-        d, k, eps = model_params
-        model = BimodalModel()
-        params, tm = model.generate(d, k, eps, m)
+        model_params.m = m
+        params, S, indicator, tm = noise_model.generate(model_params)
         
-        O = LA.norm(tm - np.mean(params.S * params.indicator[...,np.newaxis], axis=0))
+        O = LA.norm(tm - np.mean(S * indicator[...,np.newaxis], axis=0))
         
         for f in keys:
-            results.setdefault(f.__name__, []).append(LA.norm(tm - f(params))/eps)
+            func = f(params)
+
+
+            results.setdefault(f.__name__, []).append(LA.norm(tm - func.alg(S, indicator))/model_params.eps)
             
-        results.setdefault('oracle', []).append(O/eps)
+        results.setdefault('oracle', []).append(O/model_params.eps)
         results.setdefault('eps', []).append(1)
     
     return results
@@ -306,21 +297,20 @@ def plot_l_samples(Run, keys):
     for key in keys:
         A = np.array([res[key] for res in Run.runs])
         xs = np.arange(*Run.bounds)
-        plt.plot(xs, np.array(np.median(A,axis = 0)), label=key, color = cols[key])
+        xs = xs.tolist()
+
+        plt.plot(xs, np.median(A,axis = 0), label=key, color = cols[key])
+
         mins = [np.sort(x)[int(s*0.25)] for x in A.T]
         maxs = [np.sort(x)[int(s*0.75)] for x in A.T]
-        plt.fill_between(xs, mins, maxs, color=cols[key], alpha=0.2)
-    d, k, di, eps = Run.params
-    plt.title(f'd = {d}, k = {k}, eps = {eps}')
+
+        plt.fill_between(xs, mins, maxs, color = cols[key], alpha=0.2)
+
+    plt.title(f'd = {Run.params.d}, k = {Run.params.k}, eps = {Run.params.eps}')
     plt.xlabel('m')
     plt.ylabel('MSE/eps')
     plt.legend()
 
-
-""" Filters """
-
-
-""" Auxillary functions """
 
 """ P(x) for quadratic filter """
 
@@ -331,6 +321,7 @@ def p(X, mu, M):
     return (vec - np.trace(M))/F
 
 
+""" Thing that thresholds to the largest k entries indicaors """
 
 def indicat(M, k): 
     
@@ -362,6 +353,9 @@ def topk_abs(v, k):
     z[u] = v[u]
     return z
         
+    
+""" Ransac Gaussian Mean """ 
+
 def ransacGaussianMean(params):
     k = params.k
     d = params.d
