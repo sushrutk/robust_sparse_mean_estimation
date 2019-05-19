@@ -86,6 +86,7 @@ class FilterAlgs(object):
     qfilter = True
     lfilter = True
     verbose = True
+    is_sparse = True
     figure_no = 0
     fdr = 0.1
     
@@ -98,15 +99,15 @@ class FilterAlgs(object):
     
     """ Tail estimates """
     
-    def drop_points(self, params, x, tail, fdr = 0.1, plot = False, f = 0):
-        S = params.S
-        indicator = params.indicator
-        eps = params.eps
-        m = params.m
-        d = params.d
+    def drop_points(self, x, tail, fdr = 0.1, plot = False, f = 0):
+        S = self.params.S
+        indicator = self.params.indicator
+        eps = self.params.eps
+        m = self.params.m
+        d = self.params.d
 
         l = len(S)
-        p_x = tail(x, params)
+        p_x = tail(x)
         p_x[p_x > 1] = 1
 
         sorted_idx = np.argsort(p_x)
@@ -156,37 +157,37 @@ class FilterAlgs(object):
         eps = self.params.eps
         
         if ev > 1 + eps*np.sqrt(np.log(1/eps)): 
-            if verbose:
+            if self.verbose:
                 print("Linear filter...")
-
-            x = len(S)
-            
-            p2 = copy.copy(self.params)
-            p2.S = S[np.ix_(np.arange(x),u)]
-            p2.indicator = indicator
-            
-            dots = p2.S.dot(v)
+            l = len(S)
+            S_u = S[np.ix_(np.arange(l),u)]
+            dots = S_u.dot(v)
             m2 = np.median(dots)
             x = np.abs(dots - m2) - 3*np.sqrt(eps*ev)
             
-            idx = self.drop_points(p2, x, tail_m, self.fdr, self.do_plot_linear, self.figure_no)  
+            idx = self.drop_points(x, self.tail_m, self.fdr, self.do_plot_linear, self.figure_no)  
             
-            if verbose:
+            if self.verbose:
                 bad_filtered = np.sum(indicator) - np.sum(indicator[idx])
-                print(f"Filtered out {x - len(idx[0])}/{x}, {bad_filtered} false ({bad_filtered / (x - len(idx[0])):0.2f} vs {fdr})")
+                print(f"Filtered out {l - len(idx[0])}/{l}, {bad_filtered} false ({bad_filtered / (l - len(idx[0])):0.2f} vs {self.fdr})")
             return idx
         else:
             return np.arange(len(S), 1)
     
-    def quadratic_filter(self, M_mask): 
+    def quadratic_filter(self, M_mask):
+        indicator = self.params.indicator
+        l = len(indicator)
         mu_e = np.mean(self.params.S, axis = 0)
-        p2 = copy.copy(self.params)        
-        p_x = tail_c(np.abs(p(self.params.S, mu_e, M_mask)), p2)
         x = np.abs(p(self.params.S, mu_e, M_mask))
 
-        idx = self.drop_points(p2, x, tail_c, self.fdr, self.do_plot_quadratic, self.figure_no)
-                
-        return idx
+        idx = self.drop_points(x, self.tail_c, self.fdr, self.do_plot_quadratic, self.figure_no)
+        
+        if self.verbose:
+            bad_filtered = np.sum(indicator) - np.sum(indicator[idx])
+            print(f"Filtered out {l - len(idx[0])}/{l}, {bad_filtered} false ({bad_filtered / (l - len(idx[0])):0.2f} vs {self.fdr})")
+            return idx
+        else:
+            return np.arange(len(S), 1)
     
     def update_params(self, idx):
         self.params.S = self.params.S[idx]
@@ -205,6 +206,7 @@ class FilterAlgs(object):
         T_naive = np.sqrt(2*np.log(m*d/tau))
         med = np.median(self.params.S, axis=0)
         idx = (np.max(np.abs(med-self.params.S), axis=1) < T_naive)
+        
         if len(idx) < self.params.m: print("NP pruned {self.params.m - len(idx) f} points")
         
         while True:
@@ -252,8 +254,8 @@ class FilterAlgs(object):
                 print("Neither filter filtered anything.")
                 break
                     
-        if is_sparse == True:
-            return topk_abs(np.mean(self.params.S, axis=0))
+        if self.is_sparse == True:
+            return topk_abs(np.mean(self.params.S, axis=0), k)
         else:
             return np.mean(self.params.S, axis=0)
             
