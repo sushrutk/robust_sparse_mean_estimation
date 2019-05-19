@@ -47,10 +47,10 @@ class BimodalModel(object):
         pass
     
     def generate(self, d, k, eps, m, tau=0.2):
-        tm = np.append(np.ones(k), np.zeros(d-k))
+        tm = np.zeros(d)
         fm = np.append(np.zeros(d-k), np.ones(k))
 
-        cov = 2*np.identity(d) - np.diag(tm)
+        cov = 2*np.identity(d) - np.diag(fm)
 
         G = np.random.randn(m, d) + tm
         G2 = np.random.multivariate_normal(np.zeros(d), cov, (m,))
