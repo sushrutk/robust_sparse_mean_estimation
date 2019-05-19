@@ -8,17 +8,14 @@ import mpld3
 mpld3.enable_notebook()
 
 class RunCollection(object):
-    def __init__(self, func, model, params, bounds = 0, keys = []):
+    def __init__(self, func, inp):
         self.runs = []
         self.func = func
-        self.params = params
-        self.bounds = bounds
-        self.keys = keys
-        self.model = model
-        
+        self.inp = inp
+
     def run(self, trials):
         for i in range(trials):
-            self.runs.append(self.func(self.model, self.params, self.keys, self.bounds))
+            self.runs.append(self.func(*self.inp))
 
 class DenseNoiseModel(object):
     def __init__(self, dist):
@@ -268,6 +265,104 @@ class RME_sp_L(FilterAlgs):
     lfilter, qfilter = False, True
 
 
+class ransacGaussianMean(object):
+    def __init__(self, params):
+        self.params = params
+        pass
+
+    def alg(self, S, indicator):
+        k = self.params.k
+        d = self.params.d
+        m = self.params.m
+        eps = self.params.eps
+        tau = self.params.tau
+
+        T_naive = np.sqrt(2*np.log(m*d/tau))
+       
+        med = np.median(S, axis=0)
+        S = S[np.max(np.abs(med-S), axis=1) < T_naive]
+
+        empmean = np.mean(S, axis=0)
+
+        ransacN = S.shape[0]//2
+        print("ransacN", ransacN)
+        
+        if ransacN > m: 
+            return topk_abs(empmean, k)
+        
+        numIters = 5
+        thresh = k*np.log(d) + 2*(np.sqrt(k* np.log(d) * np.log(m/tau)) + np.log(m/tau)) + (eps**2)*(np.log(1/eps))**2
+        
+        bestMean = empmean
+        bestInliers = (S[LA.norm(S-empmean) < np.sqrt(thresh)]).shape[0]
+        
+        for i in np.arange(1, numIters, 1):
+            ransacS = S[np.random.choice(S.shape[0], ransacN, replace=False)]
+            ransacMean = np.mean(ransacS)
+            curInliers = (S[LA.norm(S-ransacMean) < np.sqrt(thresh)]).shape[0]
+            if curInliers > bestInliers:
+                bestMean = ransacMean
+                bestInliers = curInliers
+
+        return topk_abs(bestMean, k)
+
+
+class plot(RunCollection):
+
+    def __init__(self, model, params, loss, keys = []):
+        self.params = params
+        self.keys = keys
+        self.model = model
+        self.loss = loss
+        self.inp = 0
+
+    def get_dataxy(self, xvar_name, bounds):
+        results = {}
+        for xvar in np.arange(*bounds):
+            if xvar_name == 'm':
+                self.params.m = xvar
+            elif xvar_name == 'k':
+                self.params.k = xvar
+            elif xvar_name == 'd':
+                self.params.d = xvar
+            elif xvar_name == 'eps':
+                self.params.eps = xvar
+            inp, S, indicator, tm = self.model.generate(self.params)
+
+            O = self.loss(np.mean(S * indicator[...,np.newaxis], axis=0), tm)
+            
+            for f in self.keys:
+                func = f(inp)
+                results.setdefault(f.__name__, []).append(self.loss(func.alg(S, indicator), tm))
+                
+            results.setdefault('oracle', []).append(O)
+        return results
+
+    def plot_xloss(self, Run, xvar_name, bounds):
+        cols = {'RME_sp':'b', 'RME_sp_L':'g', 'RME':'r','ransacGaussianMean':'y' , 'NP_sp':'k'}
+        s = len(Run.runs)
+        for key in self.keys:
+            A = np.array([res[key.__name__] for res in Run.runs])
+            xs = np.arange(*bounds)
+            mins = [np.sort(x)[int(s*0.25)] for x in A.T]
+            maxs = [np.sort(x)[int(s*0.75)] for x in A.T]
+
+            plt.fill_between(xs, mins, maxs, color = cols[key.__name__], alpha=0.2)
+            plt.plot(xs, np.median(A,axis = 0), label=key.__name__, color = cols[key.__name__])
+
+        plt.title(f'd = {self.params.d}, k = {self.params.k}, eps = {self.params.eps}')
+        plt.xlabel(xvar_name)
+        plt.ylabel('MSE/eps')
+        plt.legend()
+
+    def plotxy(self, xvar_name, bounds, trials, ylims):
+        Runs_l_samples = RunCollection(self.get_dataxy, (xvar_name, bounds))
+        Runs_l_samples.run(trials)
+        print(xvar_name)
+        self.plot_xloss(Runs_l_samples, xvar_name, bounds)
+        plt.ylim(*ylims)
+        plt.figure()
+
 
 def sparse_samp_loss(noise_model, model_params, keys, m_bounds):
     (Low, Up, step) = m_bounds
@@ -282,8 +377,6 @@ def sparse_samp_loss(noise_model, model_params, keys, m_bounds):
         
         for f in keys:
             func = f(params)
-
-
             results.setdefault(f.__name__, []).append(LA.norm(tm - func.alg(S, indicator))/model_params.eps)
             
         results.setdefault('oracle', []).append(O/model_params.eps)
@@ -291,25 +384,24 @@ def sparse_samp_loss(noise_model, model_params, keys, m_bounds):
     
     return results
 
-import json
+# import json
 
-def plot_l_samples(Run, keys):
-    cols = {'RME_sp':'b', 'RME_sp_L':'g', 'RME':'r','ransacGaussianMean':'y' , 'NP_sp':'g'}
-    s = len(Run.runs)
-    for key in keys:
-        A = np.array([res[key] for res in Run.runs])
-        xs = np.arange(*Run.bounds)
-        mins = [np.sort(x)[int(s*0.25)] for x in A.T]
-        maxs = [np.sort(x)[int(s*0.75)] for x in A.T]
+# def plot_l_samples(Run, keys):
+#     cols = {'RME_sp':'b', 'RME_sp_L':'g', 'RME':'r','ransacGaussianMean':'y' , 'NP_sp':'k'}
+#     s = len(Run.runs)
+#     for key in keys:
+#         A = np.array([res[key] for res in Run.runs])
+#         xs = np.arange(*Run.bounds)
+#         mins = [np.sort(x)[int(s*0.25)] for x in A.T]
+#         maxs = [np.sort(x)[int(s*0.75)] for x in A.T]
 
-        plt.fill_between(xs, mins, maxs, color = cols[key], alpha=0.2)
-        plt.plot(xs, np.median(A,axis = 0), label=key, color = cols[key])
+#         plt.fill_between(xs, mins, maxs, color = cols[key], alpha=0.2)
+#         plt.plot(xs, np.median(A,axis = 0), label=key, color = cols[key])
 
-
-    plt.title(f'd = {Run.params.d}, k = {Run.params.k}, eps = {Run.params.eps}')
-    plt.xlabel('m')
-    plt.ylabel('MSE/eps')
-    plt.legend()
+#     plt.title(f'd = {Run.params.d}, k = {Run.params.k}, eps = {Run.params.eps}')
+#     plt.xlabel('m')
+#     plt.ylabel('MSE/eps')
+#     plt.legend()
 
 
 """ P(x) for quadratic filter """
@@ -356,39 +448,3 @@ def topk_abs(v, k):
     
 """ Ransac Gaussian Mean """ 
 
-def ransacGaussianMean(params):
-    k = params.k
-    d = params.d
-    m = params.m
-    eps = params.eps
-    tau = params.tau
-    S = params.S
-
-    T_naive = np.sqrt(2*np.log(m*d/tau))
-   
-    med = np.median(S, axis=0)
-    S = S[np.max(np.abs(med-S), axis=1) < T_naive]
-
-    empmean = np.mean(S, axis=0)
-
-    ransacN = S.shape[0]//2
-    print("ransacN", ransacN)
-    
-    if ransacN > m: 
-        return topk_abs(empmean, k)
-    
-    numIters = 5
-    thresh = d + 2*(np.sqrt(d * np.log(m/tau)) + np.log(m/tau)) + (eps**2)*(np.log(1/eps))**2
-    
-    bestMean = empmean
-    bestInliers = (S[LA.norm(S-empmean) < np.sqrt(thresh)]).shape[0]
-    
-    for i in np.arange(1, numIters, 1):
-        ransacS = S[np.random.choice(S.shape[0], ransacN, replace=False)]
-        ransacMean = np.mean(ransacS)
-        curInliers = (S[LA.norm(S-ransacMean) < np.sqrt(thresh)]).shape[0]
-        if curInliers > bestInliers:
-            bestMean = ransacMean
-            bestInliers = curInliers
-
-    return topk_abs(bestMean, k)
