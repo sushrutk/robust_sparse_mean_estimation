@@ -431,7 +431,7 @@ class plot(RunCollection):
             plt.fill_between(xs, mins, maxs, color = cols[key.__name__], alpha=0.2)
             plt.plot(xs, np.median(A,axis = 0), label=key.__name__, color = cols[key.__name__])
 
-        plt.title(f'd = {self.params.d}, k = {self.params.k}, eps = {self.params.eps}')
+        plt.title(f'd = {self.params.d}, k = {self.params.k}, eps = {self.params.eps}, m = {self.params.m}')
         plt.xlabel(xvar_name)
         plt.ylabel('MSE/eps')
         plt.legend()
