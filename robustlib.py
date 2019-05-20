@@ -64,10 +64,11 @@ class BimodalModel(object):
     def generate(self, params):
         d, k, eps, m, tau = params.d, params.k, params.eps, params.m, params.tau
 
-        tm = np.append(np.ones(k), np.zeros(d-k))
+        # tm = np.append(np.ones(k), np.zeros(d-k))
+        tm = np.zeros(d)
         fm = np.append(np.zeros(d-k), np.ones(k))
 
-        cov = 2*np.identity(d) - np.diag(tm)
+        cov = 2*np.identity(d) - np.diag(fm)
 
         G = np.random.randn(m, d) + tm
         G2 = np.random.multivariate_normal(np.zeros(d), cov, (m,))
@@ -154,7 +155,7 @@ class FilterAlgs(object):
         sorted_p = p_x[sorted_idx]
 
         T = l - np.argmin((sorted_p - (fdr/l)*np.arange(l) > 0)[::-1])
-        if T == l : T = 0
+        if T > 0.6*l : T = 0
 
         idx = np.nonzero((p_x >= sorted_p[T]))
 
@@ -195,8 +196,6 @@ class FilterAlgs(object):
         """
         True tail.
         """
-
-        eps, k, m, d, tau = self.params.eps, self.params.k, self.params.m, self.params.d, self.params.tau 
 
         return special.erfc(T/np.sqrt(2))
 
@@ -342,6 +341,155 @@ class RME(FilterAlgs):
     dense_filter = True
     # do_plot_linear = True
 
+class RSPCAb(FilterAlgs):
+
+    do_plot_rspca = False
+    biter = 10
+
+    def __init__(params):
+        self.params = params
+
+    def tail_rspca(self, T):
+        eps = self.params.eps
+        x-=3
+        idx = np.nonzero((T < 10*np.log(1/eps)))
+        v = (1/((T*np.log(T))**2))
+        v = (eps)*v
+        v[idx] = 1
+        return v
+
+    def flatcov(self, S):
+        Id = np.identity(d)
+        S_cov = S[:,:,np.newaxis]  * S[:,np.newaxis,:] - Id
+        S_cov = S_cov.reshape((m, d**2))
+        return S_cov
+
+    def get_largest_indices(self, S_cov):
+        mu = np.mean(S_cov, axis=0)
+        u = np.argpartition(mu, -k**2)[-k**2:]
+
+        Mask = np.zeros(d**2)
+        Mask[u] = 1
+        Mask = Mask.reshape(d,d)
+        indices = np.nonzero(Mask)
+
+        return u, indices 
+
+    def guess_restricted_cov(self, S_cov, u, indices, v_prev):
+        k = self.params.k
+        Q = np.dstack(indices)[0]
+        Q2 = np.array([np.tile(Q, (len(Q),1)), np.repeat(Q, len(Q), 0)]).transpose([1,0,2])
+        
+        Cov = Id + np.outer(v_prev, v_prev)
+
+        T1 = (Cov[Q2[:,0,0], Q2[:,1,1]] * Cov[Q2[:,0,1], Q2[:,1,0]]).reshape(k**2, k**2)
+        vecCov = (np.identity(d) + np.outer(v_prev,v_prev)).reshape((d**2,))[u]
+        T2 = np.outer(vecCov, vecCov)
+
+        return T1 + T2
+
+    def vec2mat_restricted_eigv(self, vec):
+        d = self.params.d
+        k = self.params.k
+
+        u = np.argpartition(vec, -k**2)[-k**2:]
+        z = np.zeros(d**2)
+        z[u] = vec[u]
+
+        z = z.reshape((d,d))
+        _, ans = scipy.linalg.eigh(z, eigvals=(d-1,d-1))
+
+        ans = ans.reshape(d,)
+        ans = topk_abs(ans, k)
+
+        return ans
+
+    def boot_iteration(self, S, indicator, v_prev, thresh):
+        k = self.params.k
+        d = self.params.d
+        m = self.params.m
+        eps = self.params.eps
+        tau = self.params.tau
+        
+        T_naive = np.sqrt(2*np.log(m*d/tau))
+        idx = (np.max(np.abs(S), axis=1) < T_naive)
+        S, indicator =  self.update_params(S, indicator, idx)
+
+        S_cov = self.flatcov(S)
+        u, indices = self.get_largest_indices(S_cov)
+        
+        S_cov_r = S_cov[np.ix_(np.arange(m), u)]
+        guess_cov_r = self.guess_restricted_cov(S_cov, u, indices, v_prev)
+
+        while True: 
+            cov_r = np.cov(S_cov_r, rowvar=0)        
+            M = cov_r - guess_cov_r
+            
+            ev, v = scipy.linalg.eigh(cov, eigvals=(k**2-1,k**2-1))
+            v = v.reshape(len(v),)
+
+            if ev < thresh:
+                break
+            else:
+                "RSPCAb filter"
+
+                pre_filter_length = self.params.m
+                
+                dots = S_cov_r.dot(v)
+                med = np.median(dots)
+                x = np.abs(dots - med)
+
+                idx = self.drop_points(S_cov_r, indicator, x, self.tail_rspca, self.do_plot_rspca, self.figure_no)[0]
+                self.figure_no += 1
+
+                S_cov_r, indicator = self.update_params(S, indicator, idx)
+                if pre_filter_length > len(idx):
+                    continue
+                else:
+                    break
+
+        return self.vec2mat_restricted_eigv(np.mean(S_cov_r, axis=0))
+
+    def alg(self, S, indicator):
+        biter = self.biter
+        S_copy, indicator_copy = S.copy(), indicator.copy()
+        eps_prev = 2
+        v_prev = 0
+        for i in range(biter):
+            v_prev = self.boot_iteration(S, indicator, v_prev, eps_prev)
+            eps_prev = (eps_prev*eps)**(1/2) + eps*np.log(1/eps)
+        return v_prev
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+class Oracle(object):
+
+    def __init__(self, params):
+        self.params = params
+
+    def alg(self, S, indicator):
+        S_true = np.array([S[i]*indicator[i] for i in range(len(indicator))])
+        return topk_abs(np.mean(S_true, axis=0), self.params.k)
+
+
+
+
 
 
 class ransacGaussianMean(object):
@@ -424,9 +572,6 @@ class plot(RunCollection):
                     func = f(inp_copy)
 
                     results.setdefault(f.__name__, []).append(self.loss(func.alg(S_copy, indicator_copy), tm))
-                    
-                results.setdefault('oracle', []).append(O)
-
             else:
 
                 l, s = mrange
@@ -453,16 +598,14 @@ class plot(RunCollection):
 
                         samp += s
         
-                    results.setdefault(f.__name__, []).append(samp)
-                results.setdefault('oracle', []).append(O)
-               
+                    results.setdefault(f.__name__, []).append(samp)               
         return results
 
  
     def plot_xloss(self, Run, xvar_name, bounds):
-        cols = {'RME_sp':'b', 'RME_sp_L':'g', 'RME':'r','ransacGaussianMean':'y' , 'NP_sp':'k', 'oracle':'c'}
+        cols = {'RME_sp':'b', 'RME_sp_L':'g', 'RME':'r','ransacGaussianMean':'y' , 'NP_sp':'k', 'Oracle':'c'}
         s = len(Run.runs)
-        str_keys = [key.__name__ for key in self.keys]+['oracle']
+        str_keys = [key.__name__ for key in self.keys]
         for key in str_keys:
             A = np.array([res[key] for res in Run.runs])
             xs = np.arange(*bounds)
@@ -488,6 +631,7 @@ class plot(RunCollection):
         self.plot_xloss(self.Run, xvar_name, bounds)
         plt.ylim(*ylims)
         plt.figure()
+
 
 
 """ P(x) for quadratic filter """
