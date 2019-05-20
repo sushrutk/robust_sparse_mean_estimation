@@ -119,11 +119,17 @@ class TailFilpModel(object):
 class FilterAlgs(object):
     do_plot_linear = False
     do_plot_quadratic = False
+
     qfilter = True
     lfilter = True
+
     verbose = True
+
     is_sparse = True
+    dense_filter = False
+    
     figure_no = 0
+    
     fdr = 0.1
     
     
@@ -132,13 +138,13 @@ class FilterAlgs(object):
         pass
     
     
-    
     """ Tail estimates """
     
-    def drop_points(self, S, indicator, x, tail, fdr = 0.1, plot = False, f = 0):
+    def drop_points(self, S, indicator, x, tail, plot = False, f = 0):
         eps = self.params.eps
         m = self.params.m
         d = self.params.d
+        fdr = self.fdr
 
         l = len(S)
         p_x = tail(x)
@@ -148,7 +154,7 @@ class FilterAlgs(object):
         sorted_p = p_x[sorted_idx]
 
         T = l - np.argmin((sorted_p - (fdr/l)*np.arange(l) > 0)[::-1])
-        if T > 0.51*m : T = 0
+        if T == l : T = 0
 
         idx = np.nonzero((p_x >= sorted_p[T]))
 
@@ -179,11 +185,21 @@ class FilterAlgs(object):
         
         eps, k, m, d, tau = self.params.eps, self.params.k, self.params.m, self.params.d, self.params.tau    
 
-        idx = np.nonzero((T < 6))
+        # idx = np.nonzero((T < 6))
         v = 3*np.exp(-T/3) + (eps**2/(T*(np.log(T)**2)))
-        v[idx] = 1
+        # v[idx] = 1
         
         return v
+
+    def tail_t(self, T):
+        """
+        True tail.
+        """
+
+        eps, k, m, d, tau = self.params.eps, self.params.k, self.params.m, self.params.d, self.params.tau 
+
+        return special.erfc(T/np.sqrt(2))
+
 
     def linear_filter(self, S, indicator, ev, v, u):
         eps = self.params.eps
@@ -195,16 +211,20 @@ class FilterAlgs(object):
             S_u = S[np.ix_(np.arange(l),u)]
             dots = S_u.dot(v)
             m2 = np.median(dots)
-            x = np.abs(dots - m2) - 3*np.sqrt(eps*ev)
-            
-            idx = self.drop_points(S, indicator, x, self.tail_m, self.fdr, self.do_plot_linear, self.figure_no)  
+
+            if self.dense_filter == False:
+                x = np.abs(dots - m2) - 2*np.sqrt(ev*eps)
+                idx = self.drop_points(S, indicator, x, self.tail_m,  self.do_plot_linear, self.figure_no)  
+            else:
+                x = np.abs(dots - m2)
+                idx = self.drop_points(S, indicator, x, self.tail_t,  self.do_plot_linear, self.figure_no)  
             
             if self.verbose:
                 bad_filtered = np.sum(indicator) - np.sum(indicator[idx])
                 print(f"Filtered out {l - len(idx[0])}/{l}, {bad_filtered} false ({bad_filtered / (l - len(idx[0])):0.2f} vs {self.fdr})")
             return idx
         else:
-            return np.arange(len(S), 1)
+            return np.arange(len(S))
     
     def quadratic_filter(self, S, indicator, M_mask):
 
@@ -213,14 +233,14 @@ class FilterAlgs(object):
         mu_e = np.mean(S, axis = 0)
         x = np.abs(p(S, mu_e, M_mask))
 
-        idx = self.drop_points(S, indicator, x, self.tail_c, self.fdr, self.do_plot_quadratic, self.figure_no)
+        idx = self.drop_points(S, indicator, x, self.tail_c, self.do_plot_quadratic, self.figure_no)
         
         if self.verbose:
             bad_filtered = np.sum(indicator) - np.sum(indicator[idx])
             print(f"Filtered out {l - len(idx[0])}/{l}, {bad_filtered} false ({bad_filtered / (l - len(idx[0])):0.2f} vs {self.fdr})")
             return idx
         else:
-            return np.arange(len(S), 1)
+            return np.arange(len(S))
     
     def update_params(self, S, indicator, idx):
         S, indicator = S[idx], indicator[idx]
@@ -238,7 +258,8 @@ class FilterAlgs(object):
         T_naive = np.sqrt(2*np.log(m*d/tau))
         med = np.median(S, axis=0)
         idx = (np.max(np.abs(med-S), axis=1) < T_naive)
-        
+        S, indicator =  self.update_params(S, indicator, idx)
+
         if len(idx) < self.params.m: print("NP pruned {self.params.m - len(idx) f} points")
         
         while True:
@@ -258,15 +279,24 @@ class FilterAlgs(object):
             (mask, u) = indicat(M, k)
             M_mask = mask*M
 
-            if LA.norm(M_mask) < eps*np.log(1/eps): 
-                print("Valid output")
-                break
+            if self.dense_filter == False:
+                if LA.norm(M_mask) < eps*(np.log(1/eps)): 
+                    print("Valid output")
+                    break
 
             if self.lfilter == True:
 
-                cov_u = cov_e[np.ix_(u,u)]
-                ev, v = scipy.linalg.eigh(cov_u, eigvals=(k-1,k-1))
-                v = v.reshape(len(v),)
+                if self.dense_filter == False:
+                    cov_u = cov_e[np.ix_(u,u)]
+                    ev, v = scipy.linalg.eigh(cov_u, eigvals=(k-1,k-1))
+                    v = v.reshape(len(v),)
+                else:
+                    ev, v = scipy.linalg.eigh(cov_e, eigvals=(d-1,d-1))
+                    if ev <  1+eps*np.log(1/eps):
+                        print("RME exited properly")
+                        break
+                    v = v.reshape(len(v),)
+                    u = np.arange(d)
 
                 x = self.params.m
                 idx = self.linear_filter(S, indicator, ev, v, u)
@@ -283,10 +313,11 @@ class FilterAlgs(object):
                 if len(idx) < x: continue
 
             if x == len(idx): 
-                print("Neither filter filtered anything.")
+                print("Could not filter")
                 break
                     
         if self.is_sparse == True:
+            # print(topk_abs(np.mean(S, axis=0), k))
             return topk_abs(np.mean(S, axis=0), k)
         else:
             return np.mean(S, axis=0)
@@ -298,7 +329,14 @@ class RME_sp(FilterAlgs):
     lfilter, qfilter = True, True
 
 class RME_sp_L(FilterAlgs):
-    lfilter, qfilter = False, True
+    lfilter, qfilter = True, False
+
+class RME(FilterAlgs):
+    
+    lfilter, qfilter = True, False
+    dense_filter = True
+    # do_plot_linear = True
+
 
 
 class ransacGaussianMean(object):
@@ -370,7 +408,8 @@ class plot(RunCollection):
 
                 inp, S, indicator, tm = self.model.generate(self.params)
 
-                O = self.loss(np.mean(S * indicator[...,np.newaxis], axis=0), tm)
+                # O = self.loss(topk_abs(np.mean(S * indicator[...,np.newaxis], axis=0), self.params.k), tm)
+                O = self.loss(topk_abs(np.mean(S[:int(self.params.m*(1-self.params.eps))], axis=0), self.params.k), tm)
                 
                 for f in self.keys:
                     inp_copy = copy.copy(inp)
@@ -392,48 +431,45 @@ class plot(RunCollection):
                     while True:
 
                         count = 0
-
                         for i in range(10):
 
                             self.params.m = samp
                             inp, S, indicator, tm = self.model.generate(self.params)
 
                             func = f(inp)
-
                             vnew = self.loss(func.alg(S, indicator), tm)
-
                             print("VNEW ",vnew,"m ",samp,"xvar ",xvar,"count",count)
                         
                             # if vnew < 2*self.params.eps:
                             if vnew < 1.2:
                                 count += 1
-
-                        
                         if count > 7:
                             break
 
                         samp += s
         
                     results.setdefault(f.__name__, []).append(samp)
+                results.setdefault('oracle', []).append(O)
                
         return results
 
  
     def plot_xloss(self, Run, xvar_name, bounds):
-        cols = {'RME_sp':'b', 'RME_sp_L':'g', 'RME':'r','ransacGaussianMean':'y' , 'NP_sp':'k'}
+        cols = {'RME_sp':'b', 'RME_sp_L':'g', 'RME':'r','ransacGaussianMean':'y' , 'NP_sp':'k', 'oracle':'c'}
         s = len(Run.runs)
-        for key in self.keys:
-            A = np.array([res[key.__name__] for res in Run.runs])
+        str_keys = [key.__name__ for key in self.keys]+['oracle']
+        for key in str_keys:
+            A = np.array([res[key] for res in Run.runs])
             xs = np.arange(*bounds)
             mins = [np.sort(x)[int(s*0.25)] for x in A.T]
             maxs = [np.sort(x)[int(s*0.75)] for x in A.T]
 
-            plt.fill_between(xs, mins, maxs, color = cols[key.__name__], alpha=0.2)
-            plt.plot(xs, np.median(A,axis = 0), label=key.__name__, color = cols[key.__name__])
+            plt.fill_between(xs, mins, maxs, color = cols[key], alpha=0.2)
+            plt.plot(xs, np.median(A,axis = 0), label=key, color = cols[key])
 
         plt.title(f'd = {self.params.d}, k = {self.params.k}, eps = {self.params.eps}, m = {self.params.m}')
         plt.xlabel(xvar_name)
-        plt.ylabel('MSE/eps')
+        plt.ylabel('MSE')
         plt.legend()
 
 
@@ -447,46 +483,6 @@ class plot(RunCollection):
         self.plot_xloss(self.Run, xvar_name, bounds)
         plt.ylim(*ylims)
         plt.figure()
-
-# def sparse_samp_loss(noise_model, model_params, keys, m_bounds):
-#     (Low, Up, step) = m_bounds
-    
-#     results = {}
-
-#     for m in np.arange(Low, Up, step):
-#         model_params.m = m
-#         params, S, indicator, tm = noise_model.generate(model_params)
-        
-#         O = LA.norm(tm - np.mean(S * indicator[...,np.newaxis], axis=0))
-        
-#         for f in keys:
-#             func = f(params)
-#             results.setdefault(f.__name__, []).append(LA.norm(tm - func.alg(S, indicator))/model_params.eps)
-            
-#         results.setdefault('oracle', []).append(O/model_params.eps)
-#         results.setdefault('eps', []).append(1)
-    
-#     return results
-
-# 
-# import json
-
-# def plot_l_samples(Run, keys):
-#     cols = {'RME_sp':'b', 'RME_sp_L':'g', 'RME':'r','ransacGaussianMean':'y' , 'NP_sp':'k'}
-#     s = len(Run.runs)
-#     for key in keys:
-#         A = np.array([res[key] for res in Run.runs])
-#         xs = np.arange(*Run.bounds)
-#         mins = [np.sort(x)[int(s*0.25)] for x in A.T]
-#         maxs = [np.sort(x)[int(s*0.75)] for x in A.T]
-
-#         plt.fill_between(xs, mins, maxs, color = cols[key], alpha=0.2)
-#         plt.plot(xs, np.median(A,axis = 0), label=key, color = cols[key])
-
-#     plt.title(f'd = {Run.params.d}, k = {Run.params.k}, eps = {Run.params.eps}')
-#     plt.xlabel('m')
-#     plt.ylabel('MSE/eps')
-#     plt.legend()
 
 
 """ P(x) for quadratic filter """
@@ -530,6 +526,3 @@ def topk_abs(v, k):
     z[u] = v[u]
     return z
         
-    
-""" Ransac Gaussian Mean """ 
-
