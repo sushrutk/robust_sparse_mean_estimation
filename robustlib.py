@@ -224,7 +224,7 @@ class FilterAlgs(object):
                 print(f"Filtered out {l - len(idx[0])}/{l}, {bad_filtered} false ({bad_filtered / (l - len(idx[0])):0.2f} vs {self.fdr})")
             return idx
         else:
-            return np.arange(len(S))
+            return (np.arange(len(S)),)
     
     def quadratic_filter(self, S, indicator, M_mask):
 
@@ -240,7 +240,7 @@ class FilterAlgs(object):
             print(f"Filtered out {l - len(idx[0])}/{l}, {bad_filtered} false ({bad_filtered / (l - len(idx[0])):0.2f} vs {self.fdr})")
             return idx
         else:
-            return np.arange(len(S))
+            return (np.arange(len(S)),)
     
     def update_params(self, S, indicator, idx):
         S, indicator = S[idx], indicator[idx]
@@ -279,6 +279,8 @@ class FilterAlgs(object):
             (mask, u) = indicat(M, k)
             M_mask = mask*M
 
+            pre_filter_length = self.params.m
+
             if self.dense_filter == False:
                 if LA.norm(M_mask) < eps*(np.log(1/eps)): 
                     print("Valid output")
@@ -299,7 +301,8 @@ class FilterAlgs(object):
                     u = np.arange(d)
 
                 x = self.params.m
-                idx = self.linear_filter(S, indicator, ev, v, u)
+                idx = self.linear_filter(S, indicator, ev, v, u)[0]
+                # print(idx)
                 self.figure_no += 1
                 S, indicator =  self.update_params(S, indicator, idx)
                 if len(idx) < x: continue
@@ -307,12 +310,14 @@ class FilterAlgs(object):
             if self.qfilter == True:
 
                 x = self.params.m
-                idx = self.quadratic_filter(S, indicator, M_mask)
+                idx = self.quadratic_filter(S, indicator, M_mask)[0]
+                # print(idx)
                 self.figure_no += 1
                 S, indicator =  self.update_params(S, indicator, idx)
+                print("condition", len(idx), x)
                 if len(idx) < x: continue
 
-            if x == len(idx): 
+            if pre_filter_length == len(idx): 
                 print("Could not filter")
                 break
                     
