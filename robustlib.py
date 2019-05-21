@@ -24,12 +24,13 @@ def get_error(f, params, tm):
 """ Parameter object for noise models """
 
 class Params(object):
-    def __init__(self, d = 0, m = 0, eps = 0, k = 0, tau = 0.2):
+    def __init__(self, d = 0, m = 0, eps = 0, k = 0, tau = 0.2, mass = 0):
         self.d = d
         self.m = m
         self.eps = eps
         self.k = k
         self.tau = tau
+        self.mass = mass
 
 
 """ Noise models """
@@ -113,6 +114,29 @@ class TailFilpModel(object):
 
         return params, S, indicator, tm
 
+class RSPCA_MixtureModel(object):
+    def __init__(self):
+        pass
+
+    def generate(self, params, tv, fv):
+        d, eps, m, tau, mass, k = params.d, params.eps, params.m, params.tau, params.mass, params.k
+
+        # tm = np.append(np.ones(k), np.zeros(d-k))
+
+        tcov = np.identity(d) + np.outer(tv, tv)
+        fcov = np.identity(d) + mass*np.outer(fv, fv)
+
+        G1 = np.random.multivariate_normal(np.zeros(d), tcov, (m, ))
+        G2 = np.random.multivariate_normal(np.zeros(d), fcov, (m, ))
+        S = G1.copy()
+
+        L = int(m*(1-eps))
+        S[L:] = G2[L:]
+
+        indicator = np.ones(len(S))
+        indicator[L:] = 0
+        params = Params(d,m,eps,k,tau, mass = mass)
+        return params, S, indicator
 
         
 """ Algorithms """
@@ -243,7 +267,7 @@ class FilterAlgs(object):
     
     def update_params(self, S, indicator, idx):
         S, indicator = S[idx], indicator[idx]
-        self.params.m = len(idx)
+        self.params.m = len(S)
         return S, indicator
     
     def alg(self, S, indicator):
@@ -346,25 +370,31 @@ class RSPCAb(FilterAlgs):
     do_plot_rspca = False
     biter = 10
 
-    def __init__(params):
+    def __init__(self, params):
         self.params = params
 
     def tail_rspca(self, T):
         eps = self.params.eps
-        x-=3
+        # T-=3
         idx = np.nonzero((T < 10*np.log(1/eps)))
-        v = (1/((T*np.log(T))**2))
+        v = (10/((T*np.log(T))**2))
         v = (eps)*v
+        idx = np.isnan(v)
+        v[idx] = 1
         v[idx] = 1
         return v
 
     def flatcov(self, S):
+        d, m = self.params.d, self.params.m
+
         Id = np.identity(d)
         S_cov = S[:,:,np.newaxis]  * S[:,np.newaxis,:] - Id
         S_cov = S_cov.reshape((m, d**2))
         return S_cov
 
     def get_largest_indices(self, S_cov):
+        d, k = self.params.d, self.params.k
+
         mu = np.mean(S_cov, axis=0)
         u = np.argpartition(mu, -k**2)[-k**2:]
 
@@ -376,11 +406,12 @@ class RSPCAb(FilterAlgs):
         return u, indices 
 
     def guess_restricted_cov(self, S_cov, u, indices, v_prev):
-        k = self.params.k
+        d, k = self.params.d, self.params.k
+
         Q = np.dstack(indices)[0]
         Q2 = np.array([np.tile(Q, (len(Q),1)), np.repeat(Q, len(Q), 0)]).transpose([1,0,2])
         
-        Cov = Id + np.outer(v_prev, v_prev)
+        Cov = np.outer(v_prev, v_prev)
 
         T1 = (Cov[Q2[:,0,0], Q2[:,1,1]] * Cov[Q2[:,0,1], Q2[:,1,0]]).reshape(k**2, k**2)
         vecCov = (np.identity(d) + np.outer(v_prev,v_prev)).reshape((d**2,))[u]
@@ -388,92 +419,95 @@ class RSPCAb(FilterAlgs):
 
         return T1 + T2
 
-    def vec2mat_restricted_eigv(self, vec):
-        d = self.params.d
-        k = self.params.k
+    def vec2mat_restricted_eigv(self, vec, u):
+        d, k = self.params.d, self.params.k
 
-        u = np.argpartition(vec, -k**2)[-k**2:]
         z = np.zeros(d**2)
-        z[u] = vec[u]
+        z[u] = vec
 
-        z = z.reshape((d,d))
+        z = z.reshape(d,d)
+
+        # M = np.zeros((d,d))
+        # M[np.nonzero(z)] = 1
+        # print(M)
+
         _, ans = scipy.linalg.eigh(z, eigvals=(d-1,d-1))
 
         ans = ans.reshape(d,)
-        ans = topk_abs(ans, k)
+        # ans = topk_abs(ans, k)
 
         return ans
 
     def boot_iteration(self, S, indicator, v_prev, thresh):
         k = self.params.k
         d = self.params.d
-        m = self.params.m
         eps = self.params.eps
         tau = self.params.tau
-        
-        T_naive = np.sqrt(2*np.log(m*d/tau))
+
+        T_naive = np.sqrt(2*np.log(self.params.m*d/tau))
         idx = (np.max(np.abs(S), axis=1) < T_naive)
         S, indicator =  self.update_params(S, indicator, idx)
 
-        S_cov = self.flatcov(S)
-        u, indices = self.get_largest_indices(S_cov)
         
-        S_cov_r = S_cov[np.ix_(np.arange(m), u)]
-        guess_cov_r = self.guess_restricted_cov(S_cov, u, indices, v_prev)
 
         while True: 
-            cov_r = np.cov(S_cov_r, rowvar=0)        
+            # print("S shape..", S.shape)
+            S_cov = self.flatcov(S)
+            u, indices = self.get_largest_indices(S_cov)
+            
+            S_cov_r = S_cov[np.ix_(np.arange(self.params.m), u)]
+            guess_cov_r = self.guess_restricted_cov(S_cov, u, indices, v_prev)
+
+            cov_r = np.cov(S_cov_r, rowvar=0)    
             M = cov_r - guess_cov_r
             
-            ev, v = scipy.linalg.eigh(cov, eigvals=(k**2-1,k**2-1))
+            ev, v = scipy.linalg.eigh(M, eigvals=(k**2-1,k**2-1))
             v = v.reshape(len(v),)
 
             if ev < thresh:
+                print("Valid exit.")
                 break
             else:
-                "RSPCAb filter"
+                print("RSPCAb filtering...")
 
-                pre_filter_length = self.params.m
+                l = pre_filter_length = self.params.m
                 
                 dots = S_cov_r.dot(v)
                 med = np.median(dots)
                 x = np.abs(dots - med)
 
-                idx = self.drop_points(S_cov_r, indicator, x, self.tail_rspca, self.do_plot_rspca, self.figure_no)[0]
+                idx = self.drop_points(S, indicator, x, self.tail_rspca, self.do_plot_rspca, self.figure_no)[0]
                 self.figure_no += 1
 
-                S_cov_r, indicator = self.update_params(S, indicator, idx)
+                if self.verbose:
+                    bad_filtered = np.sum(indicator) - np.sum(indicator[idx])
+                    print(f"Filtered out {l - len(idx)}/{l}, {bad_filtered} false ({bad_filtered / (l - len(idx)):0.2f} vs {self.fdr})")
+
+                S, indicator = self.update_params(S, indicator, idx)
+
                 if pre_filter_length > len(idx):
                     continue
                 else:
                     break
 
-        return self.vec2mat_restricted_eigv(np.mean(S_cov_r, axis=0))
+        return self.vec2mat_restricted_eigv(np.mean(S_cov_r, axis=0), u)
 
     def alg(self, S, indicator):
-        biter = self.biter
+        biter, eps = self.biter, self.params.eps
         S_copy, indicator_copy = S.copy(), indicator.copy()
-        eps_prev = 2
-        v_prev = 0
+        pcopy = copy.copy(self.params)
+
+        eps_prev = 10
+        v_prev = np.zeros(self.params.d)
+
         for i in range(biter):
+            # print("Shape in biter", S.shape)
+            self.params = pcopy
+            S = S_copy
+            indicator = indicator_copy
             v_prev = self.boot_iteration(S, indicator, v_prev, eps_prev)
             eps_prev = (eps_prev*eps)**(1/2) + eps*np.log(1/eps)
         return v_prev
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
