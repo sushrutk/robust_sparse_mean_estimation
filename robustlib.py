@@ -24,13 +24,15 @@ def get_error(f, params, tm):
 """ Parameter object for noise models """
 
 class Params(object):
-    def __init__(self, d = 0, m = 0, eps = 0, k = 0, tau = 0.2, mass = 0):
+    def __init__(self, d = 0, m = 0, eps = 0, k = 0, tau = 0.2, mass = 0, tv = 0, fv = 0):
         self.d = d
         self.m = m
         self.eps = eps
         self.k = k
         self.tau = tau
         self.mass = mass
+        self.tv = tv
+        self.fv = fv
 
 
 """ Noise models """
@@ -118,9 +120,9 @@ class RSPCA_MixtureModel(object):
     def __init__(self):
         pass
 
-    def generate(self, params, tv, fv):
+    def generate(self, params):
         d, eps, m, tau, mass, k = params.d, params.eps, params.m, params.tau, params.mass, params.k
-
+        tv, fv = params.tv, params.fv
         # tm = np.append(np.ones(k), np.zeros(d-k))
 
         tcov = np.identity(d) + np.outer(tv, tv)
@@ -136,7 +138,7 @@ class RSPCA_MixtureModel(object):
         indicator = np.ones(len(S))
         indicator[L:] = 0
         params = Params(d,m,eps,k,tau, mass = mass)
-        return params, S, indicator
+        return params, S, indicator, tv
 
         
 """ Algorithms """
@@ -204,7 +206,7 @@ class FilterAlgs(object):
         
         eps, k, m, d, tau = self.params.eps, self.params.k, self.params.m, self.params.d, self.params.tau 
         
-        return (special.erfc(T/np.sqrt(2)) + (eps**2)/(np.log(k*np.log(m*d/tau))*T**2))
+        return 3*(special.erfc(T/np.sqrt(2)) + (eps**2)/(np.log(k*np.log(m*d/tau))*T**2))
 
     def tail_c(self, T): 
         
@@ -451,7 +453,8 @@ class RSPCAb(FilterAlgs):
         #         bad_filtered = np.sum(indicator) - np.sum(indicator[idx])
         #         print(f"Filtered out {l - len(idx)}/{l}, {bad_filtered} false ({bad_filtered / (l - len(idx)):0.2f} vs {self.fdr})")
         S, indicator =  self.update_params(S, indicator, idx)
-        if pre_filter_length > len(S): 
+
+        if pre_filter_length > len(S) and self.verbose == True: 
             print("NP filtered something!..")
 
 
@@ -464,18 +467,23 @@ class RSPCAb(FilterAlgs):
             
             S_cov_r = S_cov[np.ix_(np.arange(self.params.m), u)]
             guess_cov_r = self.guess_restricted_cov(S_cov, u, indices, v_prev)
-
+            # print("S_cov_r", S_cov_r)
             cov_r = np.cov(S_cov_r, rowvar=0)    
             M = cov_r - guess_cov_r
-            
+            # print("cov_r", cov_r)
+            # print("guess_cov_r", guess_cov_r)
+            # print("M", M)
+
             ev, v = scipy.linalg.eigh(M, eigvals=(k**2-1,k**2-1))
             v = v.reshape(len(v),)
 
             if ev < thresh:
-                print("Valid exit.")
+                if self.verbose == True:
+                    print("Valid exit.")
                 break
             else:
-                print("RSPCAb filtering...")
+                if self.verbose == True:
+                    print("RSPCAb filtering...")
 
                 l = pre_filter_length = self.params.m
                 
@@ -515,10 +523,8 @@ class RSPCAb(FilterAlgs):
             v_prev = self.boot_iteration(S, indicator, v_prev, eps_prev)
             eps_prev = (eps_prev*eps)**(1/2) + eps*np.log(1/eps)
             if self.verbose:
-                print(f"loss after {i} iteration!", LA.norm(np.outer(v_prev, v_prev) - np.outer(tv,tv))*(1/np.sqrt(2)))
+                print(f"loss after {i+1} iteration!", LA.norm(np.outer(v_prev, v_prev) - np.outer(tv,tv)))
         return v_prev
-
-
 
 
 class Oracle(object):
@@ -580,6 +586,7 @@ class ransacGaussianMean(object):
 class plot(RunCollection):
 
     def __init__(self, model, params, loss, keys = []):
+
         self.params = params
         self.keys = keys
         self.model = model
@@ -588,6 +595,7 @@ class plot(RunCollection):
         self.Run = 0
 
     def get_dataxy(self, xvar_name, bounds, y_is_m = False, mrange = 0):
+
         results = {}
 
         for xvar in np.arange(*bounds):
@@ -601,18 +609,21 @@ class plot(RunCollection):
                 self.params.eps = xvar
 
             if y_is_m == False:
-
                 inp, S, indicator, tm = self.model.generate(self.params)
 
+
                 # O = self.loss(topk_abs(np.mean(S * indicator[...,np.newaxis], axis=0), self.params.k), tm)
-                O = self.loss(topk_abs(np.mean(S[:int(self.params.m*(1-self.params.eps))], axis=0), self.params.k), tm)
+                # O = self.loss(topk_abs(np.mean(S[:int(self.params.m*(1-self.params.eps))], axis=0), self.params.k), tm)
                 
                 for f in self.keys:
                     inp_copy = copy.copy(inp)
                     S_copy = S.copy()
                     indicator_copy = indicator.copy()
+                    # print("S", S)
 
                     func = f(inp_copy)
+                    if xvar_name == 'biter':
+                        f.biter = xvar+1
 
                     results.setdefault(f.__name__, []).append(self.loss(func.alg(S_copy, indicator_copy), tm))
             else:
@@ -645,8 +656,9 @@ class plot(RunCollection):
         return results
 
  
-    def plot_xloss(self, Run, xvar_name, bounds):
-        cols = {'RME_sp':'b', 'RME_sp_L':'g', 'RME':'r','ransacGaussianMean':'y' , 'NP_sp':'k', 'Oracle':'c'}
+    def plot_xloss(self, Run, xvar_name, bounds, title):
+
+        cols = {'RSPCAb':'b', 'RME_sp':'b', 'RME_sp_L':'g', 'RME':'r','ransacGaussianMean':'y' , 'NP_sp':'k', 'Oracle':'c'}
         s = len(Run.runs)
         str_keys = [key.__name__ for key in self.keys]
         for key in str_keys:
@@ -658,28 +670,31 @@ class plot(RunCollection):
             plt.fill_between(xs, mins, maxs, color = cols[key], alpha=0.2)
             plt.plot(xs, np.median(A,axis = 0), label=key, color = cols[key])
 
-        plt.title(f'd = {self.params.d}, k = {self.params.k}, eps = {self.params.eps}, m = {self.params.m}')
+        p = copy.copy(self.params)
+
+        plt.title(title)
         plt.xlabel(xvar_name)
-        plt.ylabel('MSE')
+        plt.ylabel('L2 Loss')
         plt.legend()
 
 
     def setdata(self, xvar_name, bounds, trials, ylims, y_is_m = False, mrange = []):
+
         Runs_l_samples = RunCollection(self.get_dataxy, (xvar_name, bounds, y_is_m, mrange))
         Runs_l_samples.run(trials)
         self.Run = Runs_l_samples
 
 
-    def plotxy(self, xvar_name, bounds, ylims):
-        self.plot_xloss(self.Run, xvar_name, bounds)
+    def plotxy(self, xvar_name, bounds, ylims, title):
+
+        self.plot_xloss(self.Run, xvar_name, bounds, title)
         plt.ylim(*ylims)
         plt.figure()
-
-
 
 """ P(x) for quadratic filter """
 
 def p(X, mu, M):
+
     F = LA.norm(M)
     D = X - mu
     vec = (D.dot(M) * D).sum(axis=1)
