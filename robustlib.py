@@ -444,9 +444,16 @@ class RSPCAb(FilterAlgs):
         eps = self.params.eps
         tau = self.params.tau
 
+        pre_filter_length = self.params.m
         T_naive = np.sqrt(2*np.log(self.params.m*d/tau))
         idx = (np.max(np.abs(S), axis=1) < T_naive)
+        # if self.verbose:
+        #         bad_filtered = np.sum(indicator) - np.sum(indicator[idx])
+        #         print(f"Filtered out {l - len(idx)}/{l}, {bad_filtered} false ({bad_filtered / (l - len(idx)):0.2f} vs {self.fdr})")
         S, indicator =  self.update_params(S, indicator, idx)
+        if pre_filter_length > len(S): 
+            print("NP filtered something!..")
+
 
         
 
@@ -492,7 +499,7 @@ class RSPCAb(FilterAlgs):
 
         return self.vec2mat_restricted_eigv(np.mean(S_cov_r, axis=0), u)
 
-    def alg(self, S, indicator):
+    def alg(self, S, indicator, tv = 0):
         biter, eps = self.biter, self.params.eps
         S_copy, indicator_copy = S.copy(), indicator.copy()
         pcopy = copy.copy(self.params)
@@ -507,6 +514,8 @@ class RSPCAb(FilterAlgs):
             indicator = indicator_copy
             v_prev = self.boot_iteration(S, indicator, v_prev, eps_prev)
             eps_prev = (eps_prev*eps)**(1/2) + eps*np.log(1/eps)
+            if self.verbose:
+                print(f"loss after {i} iteration!", LA.norm(np.outer(v_prev, v_prev) - np.outer(tv,tv))*(1/np.sqrt(2)))
         return v_prev
 
 
