@@ -188,7 +188,7 @@ class FilterAlgs(object):
         if len(S)==len(idx[0]):
             tfdr = 0
         else:
-            tfdr = (sum(indicator) - sum(indicator[idx]))/(len(S)-len(idx[0]))
+            tfdr = (sum(indicator) - sum(indicator[idx[0]]))/(len(S)-len(idx[0]))
 
         if plot==True:
             plt.plot(np.arange(l), sorted_p)
@@ -206,7 +206,7 @@ class FilterAlgs(object):
         
         eps, k, m, d, tau = self.params.eps, self.params.k, self.params.m, self.params.d, self.params.tau 
         
-        return 3*(special.erfc(T/np.sqrt(2)) + (eps**2)/(np.log(k*np.log(m*d/tau))*T**2))
+        return (special.erfc(T/np.sqrt(2)) + (3*eps**2)/(np.log(k*np.log(m*d/tau))*T**2))
 
     def tail_c(self, T): 
         
@@ -238,7 +238,7 @@ class FilterAlgs(object):
             m2 = np.median(dots)
 
             if self.dense_filter == False:
-                x = np.abs(dots - m2) - 2*np.sqrt(ev*eps)
+                x = np.abs(dots - m2) - 3*np.sqrt(ev*eps)
                 idx = self.drop_points(S, indicator, x, self.tail_m,  self.do_plot_linear, self.figure_no)  
             else:
                 x = np.abs(dots - m2)
@@ -370,7 +370,8 @@ class RME(FilterAlgs):
 class RSPCAb(FilterAlgs):
 
     do_plot_rspca = False
-    biter = 10
+    biter = 2
+    unknown_norm = False
 
     def __init__(self, params):
         self.params = params
@@ -433,9 +434,12 @@ class RSPCAb(FilterAlgs):
         # M[np.nonzero(z)] = 1
         # print(M)
 
-        _, ans = scipy.linalg.eigh(z, eigvals=(d-1,d-1))
+        ev, ans = scipy.linalg.eigh(z, eigvals=(d-1,d-1))
 
-        ans = ans.reshape(d,)
+        if self.unknown_norm:
+            ans = ev*ans.reshape(d,)
+        else:
+            ans = ans.reshape(d,)
         # ans = topk_abs(ans, k)
 
         return ans
@@ -456,9 +460,6 @@ class RSPCAb(FilterAlgs):
 
         if pre_filter_length > len(S) and self.verbose == True: 
             print("NP filtered something!..")
-
-
-        
 
         while True: 
             # print("S shape..", S.shape)
@@ -504,7 +505,6 @@ class RSPCAb(FilterAlgs):
                     continue
                 else:
                     break
-
         return self.vec2mat_restricted_eigv(np.mean(S_cov_r, axis=0), u)
 
     def alg(self, S, indicator, tv = 0):
@@ -527,17 +527,91 @@ class RSPCAb(FilterAlgs):
         return v_prev
 
 
+class RSPCAdense(FilterAlgs):
+    is_sparse = True
+    do_plot_rspca = False
+
+    def __init__(self, params):
+        self.params = params
+
+    def tail_rspcaDense(self, T): 
+        eps, k, m, d, tau = self.params.eps, self.params.k, self.params.m, self.params.d, self.params.tau 
+        
+        return (special.erfc(T)) #+ (eps**2)/(np.log(d*np.log(m*d/tau))*T**2))
+
+    def alg(self, S, indicator):
+        k = self.params.k
+        d = self.params.d
+        eps = self.params.eps
+        tau = self.params.tau
+
+        pre_filter_length = self.params.m
+        T_naive = np.sqrt(2*np.log(self.params.m*d/tau))
+        idx = (np.max(np.abs(S), axis=1) < T_naive)
+        S, indicator =  self.update_params(S, indicator, idx)
+
+        if pre_filter_length > len(S) and self.verbose == True: 
+            print("NP filtered something!..")
+
+        while True:
+            if len(S) <=1:
+                break
+            Cov = np.cov(S, rowvar = 0)
+            print(Cov.shape)
+            ev, v = scipy.linalg.eigh(Cov, eigvals=(d-1,d-1))
+            v = v.reshape(len(v),)
+            dots = S.dot(v)
+            dsort = np.sort(dots)
+            if ev > dsort[int(0.25*len(dots))] and ev < dsort[int(0.75*len(dots))]:
+                break
+            else:
+                self.stddev =  (1/1.25)*np.abs(dsort[int(0.75*len(dots))]-dsort[int(0.25*len(dots))])
+                print("Stddev", self.stddev)
+
+                l = pre_filter_length = self.params.m
+                
+                dots = dots.reshape(len(dots),)
+                med = np.median(dots)
+                x = np.abs(dots - med)/self.stddev
+
+                # print(x)
+
+                idx = self.drop_points(S, indicator, x, self.tail_rspcaDense, self.do_plot_rspca, self.figure_no)[0]
+                self.figure_no += 1
+
+                if self.verbose:
+                    bad_filtered = np.sum(indicator) - np.sum(indicator[idx])
+                    print(f"Filtered out {l - len(idx)}/{l}, {bad_filtered} false ({bad_filtered / (l - len(idx)):0.2f} vs {self.fdr})")
+
+                S, indicator = self.update_params(S, indicator, idx)
+
+                if pre_filter_length > len(idx):
+                    continue
+                else:
+                    break
+
+        Cov = np.cov(S, rowvar=0)
+        _, v = scipy.linalg.eigh(Cov, eigvals=(d-1,d-1))
+        v = v.reshape(d,)
+
+        if self.is_sparse:
+            return topk_abs(v, k)
+        else:
+            return v
+
+
+
 class Oracle(object):
 
     def __init__(self, params):
         self.params = params
 
     def alg(self, S, indicator):
-        S_true = np.array([S[i]*indicator[i] for i in range(len(indicator))])
+        S_true = np.array([S[i] for i in range(len(indicator)) if indicator[i]!=0])
+        # print(S_true)
+        # print(indicator)
         return topk_abs(np.mean(S_true, axis=0), self.params.k)
-
-
-
+        # return np.mean(S_true, axis=0)
 
 
 
@@ -564,22 +638,42 @@ class ransacGaussianMean(object):
         print("ransacN", ransacN)
         
         if ransacN > m: 
+            print("Ransac, Here")
             return topk_abs(empmean, k)
         
-        numIters = 5
-        thresh = k*np.log(d) + 2*(np.sqrt(k* np.log(d) * np.log(m/tau)) + np.log(m/tau)) + (eps**2)*(np.log(1/eps))**2
-        
+        numIters = 200
+        thresh = d*np.log(d) + 2*(np.sqrt(d* np.log(d) * np.log(m/tau)) + np.log(m/tau)) + (eps**2)*(np.log(1/eps))**2
+        # thresh = 10000
+
         bestMean = empmean
-        bestInliers = (S[LA.norm(S-empmean) < np.sqrt(thresh)]).shape[0]
+
+        # bestInliers = (S[LA.norm(S-empmean) < np.sqrt(thresh)]).shape[0]
+        bestInliers = sum([(LA.norm(x-empmean) < np.sqrt(thresh)) for x in S])
+        # print("bestInliers", bestInliers)
+        # bestMedian = np.median(np.array([LA.norm(x - empmean) for x in S]))
+        # print(len(S))
+        # print("Mean inlier val:", np.mean(sum([(LA.norm(S[i]-empmean) < np.sqrt(thresh)) for i in np.arange(len(S)) if indicator[i]!=0])))
+        # print("Mean outlier val:", np.mean(sum([(LA.norm(S[i]-empmean) < np.sqrt(thresh)) for i in np.arange(len(S)) if indicator[i]==0])))
+
         
         for i in np.arange(1, numIters, 1):
             ransacS = S[np.random.choice(S.shape[0], ransacN, replace=False)]
-            ransacMean = np.mean(ransacS)
-            curInliers = (S[LA.norm(S-ransacMean) < np.sqrt(thresh)]).shape[0]
+            ransacMean = np.mean(ransacS, axis=0)
+            curInliers = sum([(LA.norm(x-ransacMean) < np.sqrt(thresh)) for x in S])
+            # curInliers = (S[LA.norm(S-ransacMean) < np.sqrt(thresh)]).shape[0]
+            # print(curInliers)
+            print(curInliers, bestInliers)
             if curInliers > bestInliers:
                 bestMean = ransacMean
                 bestInliers = curInliers
+            # X = S - ransacMean
+            # curMedian = np.median(np.array([LA.norm(x - ransacMean) for x in S]))
+            # if curMedian < bestMedian:
+            #     bestMean = ransacMean
+            #     bestMedian = curMedian
 
+
+        # print(bestMean)
         return topk_abs(bestMean, k)
 
 
@@ -593,10 +687,62 @@ class plot(RunCollection):
         self.loss = loss
         self.inp = 0
         self.Run = 0
+        self.rspca = False
+        self.unknown_norm = False
+
+
+    def testcount(self, f, maxcount, samp):
+        count = 0
+        for i in range(maxcount):
+            self.params.m = samp
+            inp, S, indicator, tm = self.model.generate(self.params)
+            print("samp: ", samp, "i: ", i)
+            func = f(inp)
+            vnew = self.loss(func.alg(S, indicator), tm)
+            if self.rspca:
+                if vnew < 0.15:
+                    count+=1
+            else:
+                if vnew < 1.2:
+                    count += 1
+        return count
+
+    def get_maxm(self, f, minsamp=5, sampstep=5):
+        samp = minsamp
+        while True:
+            count = self.testcount(f, 10, samp)
+            print("Maxm count: ", count)
+            if count > 7:
+                break
+            samp*=sampstep
+        return samp
+
+    def search_m(self,f, bounds):
+        minm, maxm = bounds
+        samp = int((minm+maxm)/2)
+        for i in range(10):
+            count = self.testcount(f, 10, samp)
+            print("Search count: ", count)
+            if count > 7: 
+                maxm = samp
+                samp = int(samp/2)
+            else: 
+                minm = samp
+                samp = int((minm+maxm)/2)
+        return samp
+
+
+
+
+
+
 
     def get_dataxy(self, xvar_name, bounds, y_is_m = False, mrange = 0):
 
         results = {}
+        if y_is_m == True:
+            l, s = mrange
+            samp = l
 
         for xvar in np.arange(*bounds):
             if xvar_name == 'm':
@@ -609,56 +755,33 @@ class plot(RunCollection):
                 self.params.eps = xvar
 
             if y_is_m == False:
-                inp, S, indicator, tm = self.model.generate(self.params)
-
-
-                # O = self.loss(topk_abs(np.mean(S * indicator[...,np.newaxis], axis=0), self.params.k), tm)
-                # O = self.loss(topk_abs(np.mean(S[:int(self.params.m*(1-self.params.eps))], axis=0), self.params.k), tm)
-                
+                inp, S, indicator, tm = self.model.generate(self.params)                
                 for f in self.keys:
                     inp_copy = copy.copy(inp)
                     S_copy = S.copy()
                     indicator_copy = indicator.copy()
-                    # print("S", S)
 
                     func = f(inp_copy)
+                    if self.unknown_norm == True:
+                        f.unknown_norm = True
+
                     if xvar_name == 'biter':
                         f.biter = xvar+1
 
                     results.setdefault(f.__name__, []).append(self.loss(func.alg(S_copy, indicator_copy), tm))
             else:
-
-                l, s = mrange
-                samp = l
-
                 for f in self.keys:
-                    while True:
-
-                        count = 0
-                        for i in range(10):
-
-                            self.params.m = samp
-                            inp, S, indicator, tm = self.model.generate(self.params)
-
-                            func = f(inp)
-                            vnew = self.loss(func.alg(S, indicator), tm)
-                            print("VNEW ",vnew,"m ",samp,"xvar ",xvar,"count",count)
-                        
-                            # if vnew < 2*self.params.eps:
-                            if vnew < 1.2:
-                                count += 1
-                        if count > 7:
-                            break
-
-                        samp += s
-        
+                    minsamp, sampstep = 5,5
+                    print("xvar: ",xvar)
+                    maxm = self.get_maxm(f, minsamp, sampstep)
+                    samp = self.search_m(f, (minsamp,maxm))
                     results.setdefault(f.__name__, []).append(samp)               
         return results
 
  
-    def plot_xloss(self, Run, xvar_name, bounds, title):
+    def plot_xloss(self, Run, xvar_name, bounds, title, y_is_m = False):
 
-        cols = {'RSPCAb':'b', 'RME_sp':'b', 'RME_sp_L':'g', 'RME':'r','ransacGaussianMean':'y' , 'NP_sp':'k', 'Oracle':'c'}
+        cols = {'RSPCAdense':'k', 'RSPCAb':'b', 'RME_sp':'b', 'RME_sp_L':'g', 'RME':'r','ransacGaussianMean':'y' , 'NP_sp':'k', 'Oracle':'c'}
         s = len(Run.runs)
         str_keys = [key.__name__ for key in self.keys]
         for key in str_keys:
@@ -674,7 +797,10 @@ class plot(RunCollection):
 
         plt.title(title)
         plt.xlabel(xvar_name)
-        plt.ylabel('L2 Loss')
+        if xvar_name not in ['m', 'eps', 'k']:
+            plt.ylabel('samples')
+        else:
+            plt.ylabel('L2 Loss')
         plt.legend()
 
 
