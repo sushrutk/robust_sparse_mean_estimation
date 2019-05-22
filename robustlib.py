@@ -642,9 +642,9 @@ class ransacGaussianMean(object):
             return topk_abs(empmean, k)
         
         numIters = 200
-        thresh = d*np.log(d) + 2*(np.sqrt(d* np.log(d) * np.log(m/tau)) + np.log(m/tau)) + (eps**2)*(np.log(1/eps))**2
-        # thresh = 10000
-
+        # thresh = d*np.log(d) + 2*(np.sqrt(d* np.log(d) * np.log(m/tau)) + np.log(m/tau)) + (eps**2)*(np.log(1/eps))**2
+        thresh = d + np.sqrt(d)
+        print("thresh", thresh)
         bestMean = empmean
 
         # bestInliers = (S[LA.norm(S-empmean) < np.sqrt(thresh)]).shape[0]
@@ -663,6 +663,7 @@ class ransacGaussianMean(object):
             # curInliers = (S[LA.norm(S-ransacMean) < np.sqrt(thresh)]).shape[0]
             # print(curInliers)
             print(curInliers, bestInliers)
+            print(len(S))
             if curInliers > bestInliers:
                 bestMean = ransacMean
                 bestInliers = curInliers
