@@ -59,6 +59,35 @@ class DenseNoiseModel(object):
         return params, S, indicator, tm
 
 
+class MixtureMean(object):
+    def __init__(self):
+        pass
+
+    def generate(self, params):
+        d, k, eps, m, tau = params.d, params.k, params.eps, params.m, params.tau
+
+        # tm = np.append(np.ones(k), np.zeros(d-k))
+        tm = np.zeros(d)
+        fm = np.append(np.zeros(d-k), np.ones(k))
+
+        cov = 2*np.identity(d) - np.diag(fm)
+
+        G = np.random.randn(m, d) + tm
+        GF = (1/2)*np.random.randn(m, d) + (1/np.sqrt(2))
+
+        S = G.copy()
+
+        L = int(m*(1-eps))
+        # M = int((L + m)/2)
+
+        S[L:] = GF[L:]
+        # S[M:] = G2[M:]
+
+        indicator = np.ones(len(S))
+        indicator[L:] = 0
+        params = Params(d,m,eps,k,tau)
+        return params, S, indicator, tm
+
 
 class BimodalModel(object):
     def __init__(self):
