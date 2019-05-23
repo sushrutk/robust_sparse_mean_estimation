@@ -4,6 +4,8 @@ import copy
 from scipy import special
 from numpy import linalg as LA
 import matplotlib.pyplot as plt
+from pylab import rcParams
+from matplotlib import rc
 import mpld3
 mpld3.enable_notebook()
 
@@ -235,14 +237,15 @@ class FilterAlgs(object):
         
         eps, k, m, d, tau = self.params.eps, self.params.k, self.params.m, self.params.d, self.params.tau 
         
-        return (special.erfc(T/np.sqrt(2)) + (3*eps**2)/(np.log(k*np.log(m*d/tau))*T**2))
+        return (special.erfc(T/np.sqrt(2)) + (eps**2)/(np.log(k*np.log(m*d/tau))*T**2))
 
     def tail_c(self, T): 
         
         eps, k, m, d, tau = self.params.eps, self.params.k, self.params.m, self.params.d, self.params.tau    
-
+        exponent = T/2 + 1./2 - np.sqrt(1 + 2*T)/2
+        v = 2*np.exp(-exponent) + (eps**2/(2*T*(np.log(T)**2)))
         # idx = np.nonzero((T < 6))
-        v = 3*np.exp(-T/3) + (eps**2/(T*(np.log(T)**2)))
+        # v = 3*np.exp(-T/3) + (eps**2/(T*(np.log(T)**2)))
         # v[idx] = 1
         
         return v
@@ -251,8 +254,10 @@ class FilterAlgs(object):
         """
         True tail.
         """
+        eps, k, m, d, tau = self.params.eps, self.params.k, self.params.m, self.params.d, self.params.tau    
 
-        return special.erfc(T/np.sqrt(2))
+        return 8*np.exp(-T**2/2) + 8*eps/((T**2)*np.log(d*np.log(d/eps*tau)))
+
 
 
     def linear_filter(self, S, indicator, ev, v, u):
@@ -721,44 +726,69 @@ class plot(RunCollection):
         self.unknown_norm = False
 
 
-    def testcount(self, f, maxcount, samp):
+    def testcount(self, f, maxcount, samp, medianerr = False):
         count = 0
+        vs = []
         for i in range(maxcount):
             self.params.m = samp
             inp, S, indicator, tm = self.model.generate(self.params)
             print("samp: ", samp, "i: ", i)
             func = f(inp)
             vnew = self.loss(func.alg(S, indicator), tm)
-            if self.rspca:
-                if vnew < 0.15:
-                    count+=1
+            if medianerr == False:
+                if self.rspca:
+                    if vnew < 0.15:
+                        count+=1
+                else:
+                    if vnew < 1.2:
+                        count += 1
             else:
-                if vnew < 1.2:
-                    count += 1
-        return count
+                vs.append(vnew)
 
-    def get_maxm(self, f, minsamp=5, sampstep=5):
+        if medianerr == True:
+            ans = np.median(vs)
+        else:
+            ans = count
+        return ans
+
+    def get_maxm(self, f, minsamp=2, sampstep=2, medianerr = False):
         samp = minsamp
         while True:
-            count = self.testcount(f, 10, samp)
+            count = self.testcount(f, 10, samp, medianerr)
             print("Maxm count: ", count)
-            if count > 7:
-                break
-            samp*=sampstep
+            if medianerr == False:
+                if count > 7:
+                    break
+            else:
+                print(medianerr)
+                if count < 0.5:
+                    break
+            samp*=samp
         return samp
 
-    def search_m(self,f, bounds):
+    def search_m(self,f, bounds, medianerr = False):
         minm, maxm = bounds
         samp = int((minm+maxm)/2)
-        for i in range(10):
-            count = self.testcount(f, 10, samp)
-            print("Search count: ", count)
-            if count > 7: 
-                maxm = samp
-                samp = int(samp/2)
-            else: 
-                minm = samp
-                samp = int((minm+maxm)/2)
+        if medianerr == False:
+            for i in range(20):
+                count = self.testcount(f, 10, samp, medianerr)
+                print("Search count: ", count)
+                if count > 7: 
+                    maxm = samp
+                    samp = int(samp/2)
+                else: 
+                    minm = samp
+                    samp = int((minm+maxm)/2)
+        else:
+            for i in range(20):
+                count = self.testcount(f, 10, samp)
+                print("Search count: ", count)
+                if count > 0.5: 
+                    maxm = samp
+                    samp = int(samp/2)
+                else: 
+                    minm = samp
+                    samp = int((minm+maxm)/2)
         return samp
 
 
@@ -767,22 +797,32 @@ class plot(RunCollection):
 
 
 
-    def get_dataxy(self, xvar_name, bounds, y_is_m = False, mrange = 0):
+    def get_dataxy(self, xvar_name, bounds, y_is_m = False, mrange = 0, relative = False,  explicit_xs = False, xs = [], medianerr = False):
 
         results = {}
         if y_is_m == True:
             l, s = mrange
             samp = l
 
-        for xvar in np.arange(*bounds):
+        if explicit_xs == False:
+            xs = np.arange(*bounds)
+        else:
+            xs = xs
+
+        for xvar in xs:
             if xvar_name == 'm':
                 self.params.m = xvar
             elif xvar_name == 'k':
                 self.params.k = xvar
+                self.params.tv = np.append(np.ones(xvar), np.zeros(self.params.d-xvar))/np.sqrt(xvar)
+                self.params.fv = np.append(np.zeros(self.params.d-xvar), np.ones(xvar))/np.sqrt(xvar)
+
             elif xvar_name == 'd':
                 self.params.d = xvar
             elif xvar_name == 'eps':
                 self.params.eps = xvar
+
+
 
             if y_is_m == False:
                 inp, S, indicator, tm = self.model.generate(self.params)                
@@ -792,58 +832,97 @@ class plot(RunCollection):
                     indicator_copy = indicator.copy()
 
                     func = f(inp_copy)
+                    O = Oracle(inp_copy)
+
                     if self.unknown_norm == True:
                         f.unknown_norm = True
 
                     if xvar_name == 'biter':
                         f.biter = xvar+1
 
-                    results.setdefault(f.__name__, []).append(self.loss(func.alg(S_copy, indicator_copy), tm))
+                    if relative == True:
+                        results.setdefault(f.__name__, []).append(self.loss(func.alg(S_copy, indicator_copy), tm)/self.loss(O.alg(S_copy, indicator_copy), tm))
+                    else:
+                        results.setdefault(f.__name__, []).append(self.loss(func.alg(S_copy, indicator_copy), tm))
+
+
+
             else:
                 for f in self.keys:
-                    minsamp, sampstep = 5,5
+                    minsamp, sampstep = 2,2
                     print("xvar: ",xvar)
-                    maxm = self.get_maxm(f, minsamp, sampstep)
-                    samp = self.search_m(f, (minsamp,maxm))
+                    maxm = self.get_maxm(f, minsamp, sampstep, medianerr)
+                    samp = self.search_m(f, (minsamp,maxm), medianerr)
                     results.setdefault(f.__name__, []).append(samp)               
         return results
 
  
-    def plot_xloss(self, Run, xvar_name, bounds, title, y_is_m = False):
+    def plot_xloss(self, Run, xvar_name, bounds, title, xlabel, ylabel, y_is_m = False, relative = False, explicit_xs = False, xs = [], fsize = 10, fpad = 10, figsize = (1,1)):
 
         cols = {'RSPCAdense':'k', 'RSPCAb':'b', 'RME_sp':'b', 'RME_sp_L':'g', 'RME':'r','ransacGaussianMean':'y' , 'NP_sp':'k', 'Oracle':'c'}
+       
+        markers = {'RSPCAdense':'.', 
+                    'RSPCAb':'o', 
+                    'RME_sp':'o', 
+                    'RME_sp_L':'v', 
+                    'RME':'^',
+                    'ransacGaussianMean':'D' , 
+                    'NP_sp':'p', 
+                    'Oracle':'x'}
+        
+
+        labels = {'RSPCAdense':"Robust dense PCA", 
+                'RSPCAb':"Robust sparse PCA", 
+                'NP_sp':'NP', 
+                'ransacGaussianMean':'RANSAC',
+                'RME_sp':'RME_sp',
+                'RME_sp_L':'RME_sp_L',
+                'Oracle':'oracle',
+                'RME':'RME'
+                }
         s = len(Run.runs)
         str_keys = [key.__name__ for key in self.keys]
         for key in str_keys:
             A = np.array([res[key] for res in Run.runs])
-            xs = np.arange(*bounds)
+            if explicit_xs == False:
+                xs = np.arange(*bounds)
+            else:
+                xs = xs
             mins = [np.sort(x)[int(s*0.25)] for x in A.T]
             maxs = [np.sort(x)[int(s*0.75)] for x in A.T]
 
             plt.fill_between(xs, mins, maxs, color = cols[key], alpha=0.2)
-            plt.plot(xs, np.median(A,axis = 0), label=key, color = cols[key])
+            plt.plot(xs, np.median(A,axis = 0), label=labels[key], color = cols[key], marker =markers[key])
 
         p = copy.copy(self.params)
+        # rc('font', family='serif', size='15')
+        # rc('axes', labelsize='large')
+        # plt.figure(figsize=(2,1))
 
-        plt.title(title)
-        plt.xlabel(xvar_name)
-        if xvar_name not in ['m', 'eps', 'k']:
-            plt.ylabel('samples')
-        else:
-            plt.ylabel('L2 Loss')
+        plt.title(title, pad = fpad, fontsize = fsize)
+        plt.xlabel(xlabel, fontsize = fsize, labelpad = fpad)
+        plt.ylabel(ylabel, labelpad = fpad, fontsize = fsize)
+        rcParams['figure.figsize'] = figsize
+        # temp = [lgnd; lgnd.ItemText];
+        # set(temp, 'FontSize', fontsize)
+
+        # rc('font', family='serif', size='12')
+        # rc('axes', fontsize='12')
         plt.legend()
+        plt.tight_layout()
 
 
-    def setdata(self, xvar_name, bounds, trials, ylims, y_is_m = False, mrange = []):
 
-        Runs_l_samples = RunCollection(self.get_dataxy, (xvar_name, bounds, y_is_m, mrange))
+    def setdata(self, xvar_name, bounds, trials, ylims, y_is_m = False, mrange = [], relative=False,  explicit_xs = False, xs = [], medianerr = False):
+
+        Runs_l_samples = RunCollection(self.get_dataxy, (xvar_name, bounds, y_is_m, mrange, relative,  explicit_xs, xs, medianerr))
         Runs_l_samples.run(trials)
         self.Run = Runs_l_samples
 
 
-    def plotxy(self, xvar_name, bounds, ylims, title):
+    def plotxy(self, xvar_name, bounds, ylims, title, xlabel, ylabel, figsize = (1,1), fsize = 10, fpad = 10, relative = False,  explicit_xs = False, xs = []):
 
-        self.plot_xloss(self.Run, xvar_name, bounds, title)
+        self.plot_xloss(self.Run, xvar_name, bounds, title, xlabel, ylabel, figsize = figsize, fsize =fsize , fpad = fpad, relative = relative, explicit_xs = explicit_xs, xs = xs)
         plt.ylim(*ylims)
         plt.figure()
 
