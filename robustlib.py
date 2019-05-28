@@ -6,8 +6,13 @@ from numpy import linalg as LA
 import matplotlib.pyplot as plt
 from pylab import rcParams
 from matplotlib import rc
+import ast
 import mpld3
 mpld3.enable_notebook()
+
+def err_rspca(a,b): return LA.norm(np.outer(a,a)-np.outer(b, b))
+
+def err(a,b): return LA.norm(a-b)
 
 class RunCollection(object):
     def __init__(self, func, inp):
@@ -856,8 +861,27 @@ class plot(RunCollection):
                     results.setdefault(f.__name__, []).append(samp)               
         return results
 
- 
-    def plot_xloss(self, Run, xvar_name, bounds, title, xlabel, ylabel, y_is_m = False, relative = False, explicit_xs = False, xs = [], fsize = 10, fpad = 10, figsize = (1,1)):
+    def savedata(self, res, filename):
+        g = open(filename, 'w')
+        g.write(str(res)+"\n")
+        g.close()
+
+    def readdata(self, filename):
+        g = open(filename, 'r')
+        s = g.read()
+        print(s)
+        ans = ast.literal_eval(s)
+        return ans 
+
+
+    def setdata_tofile(self, filename, xvar_name, bounds, trials, ylims, y_is_m = False, mrange = [], relative=False,  explicit_xs = False, xs = [], medianerr = False):
+        self.setdata(xvar_name, bounds, trials, ylims, y_is_m, mrange, relative,  explicit_xs, xs, medianerr)
+        f = open(filename, 'w')
+        f.write(str(self.Run.runs))
+        f.close()
+
+
+    def plot_xloss(self, outputfilename, runs, xvar_name, bounds, title, xlabel, ylabel, ylims, y_is_m = False, relative = False, explicit_xs = False, xs = [], fsize = 10, fpad = 10, figsize = (1,1), fontname = 'Arial'):
 
         cols = {'RSPCAdense':'k', 'RSPCAb':'b', 'RME_sp':'b', 'RME_sp_L':'g', 'RME':'r','ransacGaussianMean':'y' , 'NP_sp':'k', 'Oracle':'c'}
        
@@ -880,10 +904,12 @@ class plot(RunCollection):
                 'Oracle':'oracle',
                 'RME':'RME'
                 }
-        s = len(Run.runs)
+
+        s = len(runs)
         str_keys = [key.__name__ for key in self.keys]
+
         for key in str_keys:
-            A = np.array([res[key] for res in Run.runs])
+            A = np.array([res[key] for res in runs])
             if explicit_xs == False:
                 xs = np.arange(*bounds)
             else:
@@ -895,21 +921,41 @@ class plot(RunCollection):
             plt.plot(xs, np.median(A,axis = 0), label=labels[key], color = cols[key], marker =markers[key])
 
         p = copy.copy(self.params)
-        # rc('font', family='serif', size='15')
-        # rc('axes', labelsize='large')
+        rcParams['figure.figsize'] = figsize
+        rcParams['font.family'] = fontname
+
+        # font = {'family' : 'serif',
+        # 'size'   : str(fsize)}
+
+        # rc('font', **font)  # pass in the font dict as kwargs
+
+
+        rc('font', family=fontname, size=fsize)
+        rc('axes', labelsize='large')
         # plt.figure(figsize=(2,1))
 
         plt.title(title, pad = fpad, fontsize = fsize)
         plt.xlabel(xlabel, fontsize = fsize, labelpad = fpad)
         plt.ylabel(ylabel, labelpad = fpad, fontsize = fsize)
-        rcParams['figure.figsize'] = figsize
+        # rcParams['figure.family'] = 'serif'
+        plt.legend()
+        plt.ylim(*ylims)
+
+        plt.savefig(outputfilename, bbox_inches = 'tight')
+
+        plt.tight_layout()
+
+
+        # plt.close()
         # temp = [lgnd; lgnd.ItemText];
         # set(temp, 'FontSize', fontsize)
 
         # rc('font', family='serif', size='12')
         # rc('axes', fontsize='12')
-        plt.legend()
-        plt.tight_layout()
+
+    def plot_xloss_fromfile(self, outputfilename, filename, xvar_name, bounds, title, xlabel, ylabel, ylims, y_is_m = False, relative = False, explicit_xs = False, xs = [], fsize = 10, fpad = 10, figsize = (1,1), fontname = 'Arial'):
+        Run = self.readdata(filename)
+        self.plot_xloss(outputfilename, Run, xvar_name, bounds, title, xlabel, ylabel, ylims, y_is_m, relative, explicit_xs, xs, fsize, fpad, figsize, fontname)
 
 
 
@@ -920,11 +966,17 @@ class plot(RunCollection):
         self.Run = Runs_l_samples
 
 
-    def plotxy(self, xvar_name, bounds, ylims, title, xlabel, ylabel, figsize = (1,1), fsize = 10, fpad = 10, relative = False,  explicit_xs = False, xs = []):
+    # def plotxy(self, xvar_name, bounds, ylims, title, xlabel, ylabel, figsize = (1,1), fsize = 10, fpad = 10, relative = False,  explicit_xs = False, xs = []):
+    #     runs = self.Run.runs
+    #     self.plot_xloss(runs, xvar_name, bounds, title, xlabel, ylabel, figsize = figsize, fsize =fsize , fpad = fpad, relative = relative, explicit_xs = explicit_xs, xs = xs)
+    #     plt.ylim(*ylims)
+    #     plt.figure()
 
-        self.plot_xloss(self.Run, xvar_name, bounds, title, xlabel, ylabel, figsize = figsize, fsize =fsize , fpad = fpad, relative = relative, explicit_xs = explicit_xs, xs = xs)
-        plt.ylim(*ylims)
+    def plotxy_fromfile(self, outputfilename, filename, xvar_name, bounds, ylims, title, xlabel, ylabel, figsize = (1,1), fsize = 10, fpad = 10, relative = False,  explicit_xs = False, xs = [], fontname = 'Arial'):
+
+        self.plot_xloss_fromfile(outputfilename, filename, xvar_name, bounds, title, xlabel, ylabel, ylims, figsize = figsize, fsize =fsize , fpad = fpad, relative = relative, explicit_xs = explicit_xs, xs = xs, fontname = fontname)
         plt.figure()
+
 
 """ P(x) for quadratic filter """
 
