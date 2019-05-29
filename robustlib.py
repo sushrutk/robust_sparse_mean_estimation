@@ -924,34 +924,18 @@ class plot(RunCollection):
         rcParams['figure.figsize'] = figsize
         rcParams['font.family'] = fontname
 
-        # font = {'family' : 'serif',
-        # 'size'   : str(fsize)}
-
-        # rc('font', **font)  # pass in the font dict as kwargs
-
 
         rc('font', family=fontname, size=fsize)
         rc('axes', labelsize='large')
-        # plt.figure(figsize=(2,1))
 
         plt.title(title, pad = fpad, fontsize = fsize)
         plt.xlabel(xlabel, fontsize = fsize, labelpad = fpad)
         plt.ylabel(ylabel, labelpad = fpad, fontsize = fsize)
-        # rcParams['figure.family'] = 'serif'
         plt.legend()
         plt.ylim(*ylims)
-
         plt.savefig(outputfilename, bbox_inches = 'tight')
-
         plt.tight_layout()
 
-
-        # plt.close()
-        # temp = [lgnd; lgnd.ItemText];
-        # set(temp, 'FontSize', fontsize)
-
-        # rc('font', family='serif', size='12')
-        # rc('axes', fontsize='12')
 
     def plot_xloss_fromfile(self, outputfilename, filename, xvar_name, bounds, title, xlabel, ylabel, ylims, y_is_m = False, relative = False, explicit_xs = False, xs = [], fsize = 10, fpad = 10, figsize = (1,1), fontname = 'Arial'):
         Run = self.readdata(filename)
@@ -964,13 +948,6 @@ class plot(RunCollection):
         Runs_l_samples = RunCollection(self.get_dataxy, (xvar_name, bounds, y_is_m, mrange, relative,  explicit_xs, xs, medianerr))
         Runs_l_samples.run(trials)
         self.Run = Runs_l_samples
-
-
-    # def plotxy(self, xvar_name, bounds, ylims, title, xlabel, ylabel, figsize = (1,1), fsize = 10, fpad = 10, relative = False,  explicit_xs = False, xs = []):
-    #     runs = self.Run.runs
-    #     self.plot_xloss(runs, xvar_name, bounds, title, xlabel, ylabel, figsize = figsize, fsize =fsize , fpad = fpad, relative = relative, explicit_xs = explicit_xs, xs = xs)
-    #     plt.ylim(*ylims)
-    #     plt.figure()
 
     def plotxy_fromfile(self, outputfilename, filename, xvar_name, bounds, ylims, title, xlabel, ylabel, figsize = (1,1), fsize = 10, fpad = 10, relative = False,  explicit_xs = False, xs = [], fontname = 'Arial'):
 
