@@ -5,6 +5,7 @@ from scipy import special
 from numpy import linalg as LA
 import matplotlib.pyplot as plt
 from pylab import rcParams
+import pickle
 from matplotlib import rc
 import ast
 import mpld3
@@ -737,13 +738,15 @@ class plot(RunCollection):
             print("samp: ", samp, "i: ", i)
             func = f(inp)
             vnew = self.loss(func.alg(S, indicator), tm)
+
+            if self.rspca: 
+                vbound = 0.15
+            else:
+                vbound = 1.2
+
             if medianerr == False:
-                if self.rspca:
-                    if vnew < 0.15:
-                        count+=1
-                else:
-                    if vnew < 1.2:
-                        count += 1
+                if vnew < vbound:
+                    count += 1
             else:
                 vs.append(vnew)
 
@@ -772,7 +775,7 @@ class plot(RunCollection):
 
     def search_m(self,f, bounds, medianerr = False):
         minm, maxm = bounds
-        samp = int((minm+maxm)/2)
+        samp = (minm + maxm)//2
 
         if medianerr == True: 
             bound = 0.5
@@ -787,14 +790,9 @@ class plot(RunCollection):
                 samp = (minm + maxm)//2
             else: 
                 minm = samp
-                samp = (minm+maxm)//2
+                samp = (minm + maxm)//2
 
         return samp
-
-
-
-
-
 
 
     def get_dataxy(self, xvar_name, bounds, y_is_m = False, mrange = 0, relative = False,  explicit_xs = False, xs = [], medianerr = False):
@@ -822,8 +820,6 @@ class plot(RunCollection):
             elif xvar_name == 'eps':
                 self.params.eps = xvar
 
-
-
             if y_is_m == False:
                 inp, S, indicator, tm = self.model.generate(self.params)                
                 for f in self.keys:
@@ -845,8 +841,6 @@ class plot(RunCollection):
                     else:
                         results.setdefault(f.__name__, []).append(self.loss(func.alg(S_copy, indicator_copy), tm))
 
-
-
             else:
                 for f in self.keys:
                     minsamp, sampstep = 2,2
@@ -856,25 +850,15 @@ class plot(RunCollection):
                     results.setdefault(f.__name__, []).append(samp)               
         return results
 
-    def savedata(self, res, filename):
-        g = open(filename, 'w')
-        g.write(str(res)+"\n")
-        g.close()
-
     def readdata(self, filename):
-        g = open(filename, 'r')
-        s = g.read()
-        print(s)
-        ans = ast.literal_eval(s)
+        with open(filename, 'rb') as g:
+            ans = pickle.load(g)
         return ans 
-
 
     def setdata_tofile(self, filename, xvar_name, bounds, trials, ylims, y_is_m = False, mrange = [], relative=False,  explicit_xs = False, xs = [], medianerr = False):
         self.setdata(xvar_name, bounds, trials, ylims, y_is_m, mrange, relative,  explicit_xs, xs, medianerr)
-        f = open(filename, 'w')
-        f.write(str(self.Run.runs))
-        f.close()
-
+        with open(filename, 'wb') as g:
+            pickle.dump(self.Run.runs, g, -1)
 
     def plot_xloss(self, outputfilename, runs, xvar_name, bounds, title, xlabel, ylabel, ylims, y_is_m = False, relative = False, explicit_xs = False, xs = [], fsize = 10, fpad = 10, figsize = (1,1), fontname = 'Arial'):
 
@@ -889,7 +873,6 @@ class plot(RunCollection):
                     'NP_sp':'p', 
                     'Oracle':'x'}
         
-
         labels = {'RSPCAdense':"Robust dense PCA", 
                 'RSPCAb':"Robust sparse PCA", 
                 'NP_sp':'NP', 
@@ -918,13 +901,10 @@ class plot(RunCollection):
         p = copy.copy(self.params)
 
         rcParams['figure.figsize'] = figsize
-        # rcParams['font.family'] = fontname
 
         rc('font', family=fontname, size=fsize)
         rc('axes', labelsize='large')
         rc('legend', numpoints=1)
-        # rc('font', family=fontname, size=fsize)
-        # rc('axes', labelsize='large')
 
         plt.title(title, pad = fpad, fontsize = fsize)
         plt.xlabel(xlabel, fontsize = fsize, labelpad = fpad)
@@ -934,12 +914,9 @@ class plot(RunCollection):
         plt.savefig(outputfilename, bbox_inches = 'tight')
         plt.tight_layout()
 
-
     def plot_xloss_fromfile(self, outputfilename, filename, xvar_name, bounds, title, xlabel, ylabel, ylims, y_is_m = False, relative = False, explicit_xs = False, xs = [], fsize = 10, fpad = 10, figsize = (1,1), fontname = 'Arial'):
         Run = self.readdata(filename)
         self.plot_xloss(outputfilename, Run, xvar_name, bounds, title, xlabel, ylabel, ylims, y_is_m, relative, explicit_xs, xs, fsize, fpad, figsize, fontname)
-
-
 
     def setdata(self, xvar_name, bounds, trials, ylims, y_is_m = False, mrange = [], relative=False,  explicit_xs = False, xs = [], medianerr = False):
 
