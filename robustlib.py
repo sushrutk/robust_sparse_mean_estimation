@@ -85,10 +85,8 @@ class MixtureMean(object):
         S = G.copy()
 
         L = int(m*(1-eps))
-        # M = int((L + m)/2)
 
         S[L:] = GF[L:]
-        # S[M:] = G2[M:]
 
         indicator = np.ones(len(S))
         indicator[L:] = 0
@@ -103,7 +101,6 @@ class BimodalModel(object):
     def generate(self, params):
         d, k, eps, m, tau = params.d, params.k, params.eps, params.m, params.tau
 
-        # tm = np.append(np.ones(k), np.zeros(d-k))
         tm = np.zeros(d)
         fm = np.append(np.zeros(d-k), np.ones(k))
 
@@ -126,7 +123,7 @@ class BimodalModel(object):
         params = Params(d,m,eps,k,tau)
         return params, S, indicator, tm
 
-class TailFilpModel(object):
+class TailFlipModel(object):
     def __init__(self):
         pass
 
@@ -758,42 +755,40 @@ class plot(RunCollection):
 
     def get_maxm(self, f, minsamp=2, sampstep=2, medianerr = False):
         samp = minsamp
+
+        if medianerr == True: 
+            bound = 0.5
+        else:
+            bound = 7
+
         while True:
             count = self.testcount(f, 10, samp, medianerr)
             print("Maxm count: ", count)
-            if medianerr == False:
-                if count > 7:
-                    break
-            else:
-                print(medianerr)
-                if count < 0.5:
-                    break
-            samp*=samp
+            if count < bound:
+                break
+            samp*=sampstep 
+
         return samp
 
     def search_m(self,f, bounds, medianerr = False):
         minm, maxm = bounds
         samp = int((minm+maxm)/2)
-        if medianerr == False:
-            for i in range(20):
-                count = self.testcount(f, 10, samp, medianerr)
-                print("Search count: ", count)
-                if count > 7: 
-                    maxm = samp
-                    samp = int(samp/2)
-                else: 
-                    minm = samp
-                    samp = int((minm+maxm)/2)
+
+        if medianerr == True: 
+            bound = 0.5
         else:
-            for i in range(20):
-                count = self.testcount(f, 10, samp)
-                print("Search count: ", count)
-                if count > 0.5: 
-                    maxm = samp
-                    samp = int(samp/2)
-                else: 
-                    minm = samp
-                    samp = int((minm+maxm)/2)
+            bound = 7
+
+        for i in range(20):
+            count = self.testcount(f, 10, samp, medianerr)
+            print("Search count: ", count)
+            if count > bound: 
+                maxm = samp
+                samp = (minm + maxm)//2
+            else: 
+                minm = samp
+                samp = (minm+maxm)//2
+
         return samp
 
 
@@ -921,12 +916,15 @@ class plot(RunCollection):
             plt.plot(xs, np.median(A,axis = 0), label=labels[key], color = cols[key], marker =markers[key])
 
         p = copy.copy(self.params)
-        rcParams['figure.figsize'] = figsize
-        rcParams['font.family'] = fontname
 
+        rcParams['figure.figsize'] = figsize
+        # rcParams['font.family'] = fontname
 
         rc('font', family=fontname, size=fsize)
         rc('axes', labelsize='large')
+        rc('legend', numpoints=1)
+        # rc('font', family=fontname, size=fsize)
+        # rc('axes', labelsize='large')
 
         plt.title(title, pad = fpad, fontsize = fsize)
         plt.xlabel(xlabel, fontsize = fsize, labelpad = fpad)
