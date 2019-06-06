@@ -715,8 +715,8 @@ class ransacGaussianMean(object):
         return topk_abs(bestMean, k)
 
 
-class plot(RunCollection):
-
+class load_data(RunCollection):
+        
     def __init__(self, model, params, loss, keys = []):
 
         self.params = params
@@ -727,7 +727,6 @@ class plot(RunCollection):
         self.Run = 0
         self.rspca = False
         self.unknown_norm = False
-
 
     def testcount(self, f, maxcount, samp, medianerr = False):
         count = 0
@@ -767,7 +766,7 @@ class plot(RunCollection):
         while True:
             count = self.testcount(f, 10, samp, medianerr)
             print("Maxm count: ", count)
-            if count < bound:
+            if (medianerr and count < bound) or (not(medianerr) and count > bound):
                 break
             samp*=sampstep 
 
@@ -776,6 +775,7 @@ class plot(RunCollection):
     def search_m(self,f, bounds, medianerr = False):
         minm, maxm = bounds
         samp = (minm + maxm)//2
+        print(samp)
 
         if medianerr == True: 
             bound = 0.5
@@ -850,15 +850,38 @@ class plot(RunCollection):
                     results.setdefault(f.__name__, []).append(samp)               
         return results
 
-    def readdata(self, filename):
-        with open(filename, 'rb') as g:
-            ans = pickle.load(g)
-        return ans 
 
     def setdata_tofile(self, filename, xvar_name, bounds, trials, ylims, y_is_m = False, mrange = [], relative=False,  explicit_xs = False, xs = [], medianerr = False):
         self.setdata(xvar_name, bounds, trials, ylims, y_is_m, mrange, relative,  explicit_xs, xs, medianerr)
         with open(filename, 'wb') as g:
             pickle.dump(self.Run.runs, g, -1)
+            
+    def setdata(self, xvar_name, bounds, trials, ylims, y_is_m = False, mrange = [], relative=False,  explicit_xs = False, xs = [], medianerr = False):
+
+        Runs_l_samples = RunCollection(self.get_dataxy, (xvar_name, bounds, y_is_m, mrange, relative,  explicit_xs, xs, medianerr))
+        Runs_l_samples.run(trials)
+        self.Run = Runs_l_samples
+
+
+
+class plot_data(RunCollection):
+
+    def __init__(self, model, params, loss, keys = []):
+
+        self.params = params
+        self.keys = keys
+        self.model = model
+        self.loss = loss
+        self.inp = 0
+        self.Run = 0
+        self.rspca = False
+        self.unknown_norm = False
+
+
+    def readdata(self, filename):
+        with open(filename, 'rb') as g:
+            ans = pickle.load(g)
+        return ans 
 
     def plot_xloss(self, outputfilename, runs, xvar_name, bounds, title, xlabel, ylabel, ylims, y_is_m = False, relative = False, explicit_xs = False, xs = [], fsize = 10, fpad = 10, figsize = (1,1), fontname = 'Arial'):
 
@@ -917,12 +940,6 @@ class plot(RunCollection):
     def plot_xloss_fromfile(self, outputfilename, filename, xvar_name, bounds, title, xlabel, ylabel, ylims, y_is_m = False, relative = False, explicit_xs = False, xs = [], fsize = 10, fpad = 10, figsize = (1,1), fontname = 'Arial'):
         Run = self.readdata(filename)
         self.plot_xloss(outputfilename, Run, xvar_name, bounds, title, xlabel, ylabel, ylims, y_is_m, relative, explicit_xs, xs, fsize, fpad, figsize, fontname)
-
-    def setdata(self, xvar_name, bounds, trials, ylims, y_is_m = False, mrange = [], relative=False,  explicit_xs = False, xs = [], medianerr = False):
-
-        Runs_l_samples = RunCollection(self.get_dataxy, (xvar_name, bounds, y_is_m, mrange, relative,  explicit_xs, xs, medianerr))
-        Runs_l_samples.run(trials)
-        self.Run = Runs_l_samples
 
     def plotxy_fromfile(self, outputfilename, filename, xvar_name, bounds, ylims, title, xlabel, ylabel, figsize = (1,1), fsize = 10, fpad = 10, relative = False,  explicit_xs = False, xs = [], fontname = 'Arial'):
 
