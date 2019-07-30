@@ -302,7 +302,7 @@ class FilterAlgs(object):
             print(f"Filtered out {l - len(idx[0])}/{l}, {bad_filtered} false ({bad_filtered / (l - len(idx[0])):0.2f} vs {self.fdr})")
             return idx
         else:
-            return (np.arange(len(S)),)
+            return (np.arange(len(S)),)        
     
     def update_params(self, S, indicator, idx):
         S, indicator = S[idx], indicator[idx]
@@ -755,20 +755,22 @@ class load_data(RunCollection):
             ans = count
         return ans
 
-    def get_maxm(self, f, minsamp=2, sampstep=2, medianerr = False):
+    def get_maxm(self, f, minsamp=2, sampstep=100, medianerr = False):
         samp = minsamp
 
-        if medianerr == True: 
-            bound = 0.5
+        if medianerr == True:
+            
+            bound = 0.3
         else:
             bound = 7
 
         while True:
+            
             count = self.testcount(f, 10, samp, medianerr)
             print("Maxm count: ", count)
             if (medianerr and count < bound) or (not(medianerr) and count > bound):
                 break
-            samp*=sampstep 
+            samp+=sampstep 
 
         return samp
 
@@ -778,14 +780,14 @@ class load_data(RunCollection):
         print(samp)
 
         if medianerr == True: 
-            bound = 0.5
+            bound = 0.3
         else:
             bound = 7
 
-        for i in range(20):
+        for i in range(25):
             count = self.testcount(f, 10, samp, medianerr)
             print("Search count: ", count)
-            if count > bound: 
+            if (medianerr and count < bound) or (not(medianerr) and count > bound): 
                 maxm = samp
                 samp = (minm + maxm)//2
             else: 
@@ -843,7 +845,7 @@ class load_data(RunCollection):
 
             else:
                 for f in self.keys:
-                    minsamp, sampstep = 2,2
+                    minsamp, sampstep = 2,100
                     print("xvar: ",xvar)
                     maxm = self.get_maxm(f, minsamp, sampstep, medianerr)
                     samp = self.search_m(f, (minsamp,maxm), medianerr)
