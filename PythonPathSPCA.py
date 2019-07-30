@@ -32,11 +32,17 @@ def PathSPCA(A,k):
 
 # **** Run quick demo ****
 # Simple data matrix with N=7 variables and M=3 samples
-k=3 # target cardinality
-A=array([[1,2,3,4,3,2,1],[4,2,1,4,3,2,1],[5,2,3,4,3,3,1]])
+k = 10
+A=numpy.random.randn(300,50)
+A = A.dot(A.T)
 
 # Call function
-vars,res,rhos=PathSPCA(A,k)
+start_time = time.time()
+
+
+vars,res,rhos, Stemp=PathSPCA(A,k)
 print res
 print vars
 print rhos
+print "--- %s seconds ---" % (time.time() - start_time)
+
