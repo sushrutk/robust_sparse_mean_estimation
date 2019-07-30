@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 from scipy import array,real,dot,column_stack,row_stack,append
 import numpy
+import time
 ra = numpy.random
 la = numpy.linalg
 
@@ -40,7 +41,7 @@ A = A.dot(A.T)
 start_time = time.time()
 
 
-vars,res,rhos =PathSPCA(A,k)
+vars,res,rhos = PathSPCA(A,k)
 print res
 print vars
 print rhos
