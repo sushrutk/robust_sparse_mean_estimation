@@ -4,8 +4,9 @@ A python implementation of algorithms in the paper https://arxiv.org/abs/1911.08
 
 Explanation of Files
 ==
-* `robustlib.py`: Library containing code for robust mean estimation and robust PCA algorithms as well as to plot comparisons between these. 
-* `experiments_notebook.ipynb`: A Jupyter notebook with code to generate plots that are seen in the paper. 
+* `robustlib.py`: Library containing code for robust mean estimation and robust PCA algorithms as well as to plot comparisons between the performance of these algorithms across various noise models.
+
+* `experiments_notebook.ipynb`: A Jupyter notebook with code to generate plots that are seen in the paper. (To install jupyter, please visit https://jupyter.org/install). 
 
 Reference
 ==
